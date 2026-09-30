@@ -17,6 +17,7 @@
 | `20260930050000` | `0395_ai_mission_acceptance_contract` | Mission 可选保存版本化的可观察 CRM 条件；数据库拒绝未知条件、重复条件和无效值。自由文本业务验收不被这些条件替代，老任务保持无结构化条件。 |
 | `20260930060000` | `0396_ai_mission_send_commands` | 负责人可用幂等、持久化命令暂停或恢复 Mission 的客户发送权限；独立 append-only 命令日志记录操作者、原因与修订。暂停撤销尚未开始发送的已批准草稿及队列任务；审批与最终渠道策略读取暂停位和最近一次暂停时间，恢复不重放旧批准。已进入外部传输的消息仍只能对账。 |
 | `20260930070000` | `0397_ai_mission_manager_followups` | Mission 内部输入账本增加种类，区分待核查同事事实与负责人可信任务方向。方向原文进入经理可见的 Mission 任务记忆与新 Run；幂等账本及事件只存摘要或身份。方向提交会原子暂停旧客户发送，旧审批不能用于新要求；后续客户回复或内部资料唤醒须继续携带当前方向。 |
+| `20260930080000` | `0398_ai_mission_direction_specialist_fence` | 负责人运行中改方向时，旧 root 与只读 specialist 子运行在同一事务取消。数据库在子运行创建、重领前锁定并核验父 root 未取消，阻止旧 Worker 在取消后复活 specialist。 |
 
 Migrations applied to Supabase project `rrydmwnporysaiysiztn` (sa-east-1, Postgres 17) via Supabase MCP on 2026-04-28.
 

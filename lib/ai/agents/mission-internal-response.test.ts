@@ -67,7 +67,8 @@ function makePool(options: {
           actor_user_id: "manager-a", kind: options.existingKind ?? "internal_fact",
         }] : [],
       };
-      if (sql.includes("from public.ai_workbench_runs") && sql.includes("order by")) {
+      if (sql.includes("from public.ai_workbench_runs") && sql.includes("run_kind='root'") &&
+          sql.includes("order by")) {
         if (options.approvalLockBusy)
           throw Object.assign(new Error("lock busy"), { code: "55P03" });
         return { rows: [{
@@ -79,7 +80,7 @@ function makePool(options: {
       }
       if (sql.includes("count(*)::int")) return { rows: [{ count: options.runCount ?? 1 }] };
       if (sql.includes("select child.id")) return {
-        rows: options.activeSpecialist ? [{ id: "specialist-active" }] : [],
+        rows: options.activeSpecialist ? [{ id: "specialist-active", parent_run_id: "run-prior" }] : [],
       };
       if (sql.includes("from public.ai_agents a")) return {
         rows: options.versionChanged || options.agentPaused ? [] : [{ operation_revision: 3 }],
@@ -90,7 +91,9 @@ function makePool(options: {
       if (sql.includes("update public.ai_agent_action_proposals")) return {
         rows: options.noPendingProposal ? [] : [{ id: "proposal-prior" }],
       };
-      if (sql.includes("update public.ai_workbench_runs")) return { rows: [{ id: "run-prior" }] };
+      if (sql.includes("update public.ai_workbench_runs")) return {
+        rows: [{ id: sql.includes("parent_run_id=$2") ? "specialist-active" : "run-prior" }],
+      };
       if (sql.includes("'run_cancelled'")) return { rows: [{ sequence: 2 }] };
       return { rows: [] };
     }),
@@ -272,6 +275,29 @@ describe("internal Mission response", () => {
     expect(calls.at(-1)?.sql).toBe("commit");
   });
 
+  it.each(["queued", "running"])(
+    "supersedes an active %s Run before queueing the new direction", async (status) => {
+      const { pool, calls } = makePool({ status, priorStatus: status,
+        activeSpecialist: status === "running", noPendingProposal: true });
+      const result = await submitMissionManagerDirection(pool, input);
+      expect(result).toMatchObject({ runStatus: "queued", missionStatus: "queued" });
+      const oldRun = calls.find((call) => call.sql.includes("update public.ai_workbench_runs") &&
+        call.sql.includes("id=$2 and status=$3"));
+      expect(oldRun?.params).toEqual(["org-a", "run-prior", status]);
+      expect(calls.find((call) => call.sql.includes("select child.id"))?.sql)
+        .toContain("for update of child nowait");
+      if (status === "running") {
+        const child = calls.find((call) => call.sql.includes("execution_lease_expires_at=null"));
+        expect(child?.params).toEqual(["org-a", "run-prior"]);
+        expect(calls.filter((call) => call.sql.includes("'run_cancelled'"))).toHaveLength(2);
+      }
+      const newRun = calls.find((call) => call.sql.includes("insert into public.ai_workbench_runs"));
+      expect(newRun?.params?.[5]).toContain("旧运行已停止");
+      expect(calls.indexOf(oldRun!)).toBeLessThan(calls.indexOf(newRun!));
+      expect(calls.at(-1)?.sql).toBe("commit");
+    },
+  );
+
   it("rolls back replacement when the old proposal disappeared or approval owns the Run", async () => {
     for (const options of [
       { status: "waiting_approval", priorStatus: "awaiting_confirmation", noPendingProposal: true },
@@ -289,7 +315,7 @@ describe("internal Mission response", () => {
   });
 
   it.each([
-    [{ status: "running" }, "state_conflict"],
+    [{ status: "running", priorStatus: "completed" }, "continuation_unavailable"],
     [{ status: "waiting_internal" }, "state_conflict"],
     [{ unauthorizedManager: true }, "source_unauthorized"],
     [{ policyResult: "unexpected" }, "send_policy_unavailable"],

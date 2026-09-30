@@ -564,7 +564,7 @@ export function LeadMissionPanel({ leadId, pipelineId, open }: {
                     </button>
                   </div>
                 )}
-                {['needs_review', 'waiting_customer', 'waiting_approval'].includes(mission.status) && (
+                {['queued', 'running', 'needs_review', 'waiting_customer', 'waiting_approval'].includes(mission.status) && (
                   <div className="space-y-2 rounded-md border border-border p-2">
                     <label htmlFor={`manager-direction-${mission.id}`} className="block text-xs font-medium">
                       负责人补充任务方向
@@ -574,7 +574,7 @@ export function LeadMissionPanel({ leadId, pipelineId, open }: {
                       maxLength={2000} rows={3}
                       placeholder="例如改用最新报价依据，先核对已执行动作，再提出新方案"
                       className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs" />
-                    <p className="text-xs text-text-muted">提交会暂停旧客户发送；若正在待审批，旧提案会撤销，新动作必须重新审批。此文字不批准报价或外发，恢复发送须另行操作。</p>
+                    <p className="text-xs text-text-muted">提交会停止旧运行，旧提案会撤销，客户发送会暂停；已完成的动作不会回滚，新运行会重新核对。此文字不批准报价或外发，恢复发送须另行操作。</p>
                     <button disabled={busy} onClick={() => void submitManagerDirection(mission.id)}
                       className="rounded-md border border-border px-2 py-1 text-xs disabled:opacity-50">
                       保存方向并继续任务

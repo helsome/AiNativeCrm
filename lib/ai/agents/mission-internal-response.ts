@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { enqueueJob } from "@/lib/agent-engine/queue/queue";
 import { loadMissionBudgetUsage, missionBudgetBlockReason } from "@/lib/ai/agents/mission-budget";
 import { loadMissionContinuationAgent } from "@/lib/ai/agents/mission-continuation-agent";
@@ -69,6 +69,31 @@ export async function submitMissionManagerDirection(
   input: Omit<InternalResponseInput, "source">,
 ): Promise<InternalResponseResult> {
   return submitMissionContinuationInput(pool, { ...input, kind: "manager_direction" });
+}
+
+async function appendDirectionCancellationEvent(
+  client: PoolClient,
+  organizationId: string,
+  runId: string,
+  actorUserId: string,
+): Promise<void> {
+  // A model worker can append a last observation while its Run is being
+  // stopped. Retry a sequence collision without losing the terminal event.
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const { rows } = await client.query<{ sequence: number }>(
+      `insert into public.ai_agent_run_events
+       (organization_id,run_id,sequence,event_type,payload)
+       select $1,$2,coalesce(max(sequence),0)+1,'run_cancelled',
+              jsonb_build_object('actorUserId',$3::uuid,'reason','manager_direction_replaced')
+       from public.ai_agent_run_events
+       where organization_id=$1 and run_id=$2
+       on conflict (run_id,sequence) do nothing
+       returning sequence`,
+      [organizationId, runId, actorUserId],
+    );
+    if (rows.length === 1) return;
+  }
+  throw new MissionInternalResponseError("state_conflict");
 }
 
 async function submitMissionContinuationInput(
@@ -243,7 +268,7 @@ async function submitMissionContinuationInput(
     }
 
     if (kind === "internal_fact" ? mission.status !== "waiting_internal"
-      : !["needs_review", "waiting_customer", "waiting_approval"].includes(mission.status))
+      : !["queued", "running", "needs_review", "waiting_customer", "waiting_approval"].includes(mission.status))
       throw new MissionInternalResponseError("state_conflict");
     if (mission.deadline_at && new Date(mission.deadline_at).getTime() <= Date.now())
       throw new MissionInternalResponseError("deadline_expired");
@@ -270,23 +295,29 @@ async function submitMissionContinuationInput(
       [input.organizationId, mission.id],
     );
     const replacingApproval = kind === "manager_direction" && mission.status === "waiting_approval";
+    const replacingActive = kind === "manager_direction" &&
+      ["queued", "running"].includes(mission.status);
     const priorMayContinue = replacingApproval
       ? prior?.status === "awaiting_confirmation"
-      : prior != null && ["completed", "partial", "failed", "cancelled"].includes(prior.status);
+      : replacingActive
+        ? prior?.status === mission.status
+        : prior != null && ["completed", "partial", "failed", "cancelled"].includes(prior.status);
     if (!prior || !priorMayContinue ||
         typeof prior.runtime_state?.versionId !== "string" ||
         (counts[0]?.count ?? 0) >= mission.max_runs)
       throw new MissionInternalResponseError("continuation_unavailable");
-    const { rows: activeChildren } = await client.query<{ id: string }>(
-      `select child.id from public.ai_workbench_runs child
+    const { rows: activeChildren } = await client.query<{ id: string; parent_run_id: string }>(
+      `select child.id,child.parent_run_id from public.ai_workbench_runs child
        join public.ai_workbench_runs root
          on root.organization_id=child.organization_id and root.id=child.parent_run_id
        where root.organization_id=$1 and root.mission_id=$2
          and child.status in ('queued','running','awaiting_confirmation')
-       limit 1`,
+       order by child.id
+       ${replacingActive ? "for update of child nowait" : "limit 1"}`,
       [input.organizationId, mission.id],
     );
-    if (activeChildren.length > 0)
+    if (activeChildren.length > 0 &&
+        (!replacingActive || activeChildren.some((child) => child.parent_run_id !== prior.id)))
       throw new MissionInternalResponseError("continuation_unavailable");
 
     const usage = await loadMissionBudgetUsage(client, input.organizationId, mission.id);
@@ -320,6 +351,7 @@ async function submitMissionContinuationInput(
       "负责人为当前业务任务补充了方向。请按新方向重新读取 CRM、会话和已执行动作；不要重复承诺或触达。",
       "旧客户发送已暂停。此指令不是对报价、外发、工具权限或其他外部动作的批准；须走独立审批与发送策略。",
       ...(replacingApproval ? ["旧待审批动作已撤销；需要根据新方向重新提出并确认动作。"] : []),
+      ...(replacingActive ? ["旧运行已停止；请先核对其已实际完成的动作，再决定下一步，不要重复执行。"] : []),
       `原业务目标：${mission.goal.slice(0, 2500)}`,
       `原验收条件：${mission.acceptance_criteria.slice(0, 1500)}`,
       `负责人新方向（不可直接作为已核实业务事实）：${JSON.stringify(content)}`,
@@ -340,7 +372,7 @@ async function submitMissionContinuationInput(
     };
     const runId = randomUUID();
     const inputId = randomUUID();
-    if (replacingApproval) {
+    if (replacingApproval || replacingActive) {
       // The Mission and old Run are both locked. A concurrent approval either
       // claimed the Run first (NOWAIT above rejects us) or will observe its
       // cancelled status after this transaction commits. Never inherit the
@@ -360,30 +392,35 @@ async function submitMissionContinuationInput(
          returning id`,
         [input.organizationId, prior.id, input.actorUserId],
       );
-      if (revoked.length === 0)
+      if (replacingApproval && revoked.length === 0)
         throw new MissionInternalResponseError("continuation_unavailable");
+      if (replacingActive && activeChildren.length > 0) {
+        const { rows: stoppedChildren } = await client.query<{ id: string }>(
+          `update public.ai_workbench_runs
+           set status='cancelled',completed_at=now(),error_code='manager_direction_replaced',
+               execution_lease_expires_at=null
+           where organization_id=$1 and parent_run_id=$2
+             and status in ('queued','running','awaiting_confirmation')
+           returning id`,
+          [input.organizationId, prior.id],
+        );
+        if (stoppedChildren.length !== activeChildren.length)
+          throw new MissionInternalResponseError("state_conflict");
+        for (const child of stoppedChildren)
+          await appendDirectionCancellationEvent(client, input.organizationId, child.id,
+            input.actorUserId);
+      }
       const { rows: cancelled } = await client.query<{ id: string }>(
         `update public.ai_workbench_runs
          set status='cancelled',completed_at=now(),error_code='manager_direction_replaced'
-         where organization_id=$1 and id=$2 and status='awaiting_confirmation'
+         where organization_id=$1 and id=$2 and status=$3
          returning id`,
-        [input.organizationId, prior.id],
+        [input.organizationId, prior.id, prior.status],
       );
       if (cancelled.length !== 1)
         throw new MissionInternalResponseError("state_conflict");
-      const { rows: terminalEvent } = await client.query<{ sequence: number }>(
-        `insert into public.ai_agent_run_events
-         (organization_id,run_id,sequence,event_type,payload)
-         select $1,$2,coalesce(max(sequence),0)+1,'run_cancelled',
-                jsonb_build_object('actorUserId',$3::uuid,'reason','manager_direction_replaced')
-         from public.ai_agent_run_events
-         where organization_id=$1 and run_id=$2
-         on conflict (run_id,sequence) do nothing
-         returning sequence`,
-        [input.organizationId, prior.id, input.actorUserId],
-      );
-      if (terminalEvent.length !== 1)
-        throw new MissionInternalResponseError("state_conflict");
+      await appendDirectionCancellationEvent(client, input.organizationId, prior.id,
+        input.actorUserId);
     }
     if (kind === "manager_direction") {
       await client.query(

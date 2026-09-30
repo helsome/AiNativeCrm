@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 type RouteCtx = { params: Promise<{ id: string }> };
 const inputSchema = z.object({ direction: z.string().trim().min(5).max(2000) }).strict();
 
-/** Manager direction starts a fresh, audited Run at a safe Mission boundary. */
+/** Manager direction atomically supersedes an active or waiting Run. */
 export async function POST(request: NextRequest, ctx: RouteCtx): Promise<Response> {
   const requestId = randomUUID();
   const { id } = await ctx.params;
@@ -57,7 +57,7 @@ export async function POST(request: NextRequest, ctx: RouteCtx): Promise<Respons
     if (error instanceof MissionInternalResponseError) {
       const messages: Record<typeof error.code, string> = {
         not_found: "任务不存在。",
-        state_conflict: "当前只能在待审批、待复核或等待客户时补充方向；若审批正在处理，请刷新后重试。",
+        state_conflict: "当前任务状态不允许改方向，或旧运行正在处理关键操作；请刷新后重试。",
         deadline_expired: "任务截止时间已过，需人工复核。",
         continuation_unavailable: "运行状态或任务次数不允许续跑，请人工复核。",
         budget_unavailable: "无法核对任务预算，请稍后重试。",

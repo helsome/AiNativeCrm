@@ -12,7 +12,7 @@ function response(data: unknown) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("LeadMissionPanel internal information", () => {
-  it("submits a manager follow-up only at a safe Mission boundary", async () => {
+  it("submits a manager follow-up at a waiting Mission boundary", async () => {
     const fetch = vi.fn()
       .mockResolvedValueOnce(response([{ id: MISSION, goal: "推进报价", acceptance_criteria: "客户确认",
         status: "needs_review", blocked_reason: "报价需核对", resolution_reason: null,
@@ -34,6 +34,24 @@ describe("LeadMissionPanel internal information", () => {
     expect(await screen.findByText("待执行")).toBeInTheDocument();
     expect(screen.getByText("负责人方向：改用新报价依据，先核对客户需求")).toBeInTheDocument();
     expect(screen.getByText(/客户发送已暂停/)).toBeInTheDocument();
+  });
+
+  it("offers controlled restart while a Mission is running", async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(response([{ id: MISSION, goal: "推进报价", acceptance_criteria: "客户确认",
+        status: "running", blocked_reason: null, latest_run_id: "run-old" }]))
+      .mockResolvedValueOnce(response({ missionId: MISSION, runId: "run-new",
+        missionStatus: "queued", customerSendPaused: true }));
+    vi.stubGlobal("fetch", fetch);
+    vi.stubGlobal("crypto", { randomUUID: () => KEY });
+    render(<LeadMissionPanel leadId="lead-a" pipelineId="pipeline-a" open />);
+    expect(await screen.findByText(/提交会停止旧运行/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("负责人补充任务方向"), {
+      target: { value: "停止旧分析，先核对最新客户需求" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存方向并继续任务" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    expect(fetch.mock.calls[1]?.[0]).toBe(`/api/v1/ai/missions/${MISSION}/follow-up`);
   });
 
   it("offers a replacement direction while an old action is waiting for approval", async () => {

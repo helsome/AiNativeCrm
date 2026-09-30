@@ -76,6 +76,14 @@ const FOLLOWUP = {
   run: "a3910000-7777-4000-8000-000000000011",
   key: "a3910000-bbbb-4000-8000-000000000011",
 };
+const ACTIVE_DIRECTION = {
+  lead: "a3910000-4444-4000-8000-000000000016",
+  mission: "a3910000-6666-4000-8000-000000000016",
+  run: "a3910000-7777-4000-8000-000000000016",
+  child: "a3910000-8888-4000-8000-000000000016",
+  attempt: "a3910000-9999-4000-8000-000000000016",
+  key: "a3910000-bbbb-4000-8000-000000000016",
+};
 const DIRECTION_FENCE = {
   lead: "a3910000-4444-4000-8000-000000000015",
   mission: "a3910000-6666-4000-8000-000000000015",
@@ -219,6 +227,24 @@ beforeAll(() => {
         '${A.user}','首次执行','act','completed',
         '{"maxSteps":6,"tokenBudget":5000,"costBudgetCents":50}',
         '{"versionId":"${CONTINUATION.version}"}');
+    insert into public.crm_leads(id,organization_id,pipeline_id,stage_id,title)
+      values ('${ACTIVE_DIRECTION.lead}','${A.org}','${A.pipeline}','${A.stage}','Active direction');
+    insert into public.ai_missions(id,organization_id,lead_id,actor_user_id,goal,acceptance_criteria)
+      values ('${ACTIVE_DIRECTION.mission}','${A.org}','${ACTIVE_DIRECTION.lead}','${A.user}',
+        '核对商机并跟进客户','客户确认下一步');
+    insert into public.ai_workbench_runs
+      (id,organization_id,agent_id,mission_id,actor_user_id,task,mode,status,budget,runtime_state)
+      values ('${ACTIVE_DIRECTION.run}','${A.org}','${A.agent}','${ACTIVE_DIRECTION.mission}',
+        '${A.user}','首次执行','act','running',
+        '{"maxSteps":6,"tokenBudget":5000,"costBudgetCents":50}',
+        '{"versionId":"${CONTINUATION.version}","directionRevision":0}');
+    insert into public.ai_workbench_runs
+      (id,organization_id,agent_id,parent_run_id,run_kind,specialist_key,collaboration_key,task,mode,status)
+      values ('${ACTIVE_DIRECTION.child}','${A.org}','${A.agent}','${ACTIVE_DIRECTION.run}',
+        'specialist','customer_evidence','manager-replan','读取客户证据','inspect','queued');
+    select execution_attempt_id from public.fn_claim_ai_specialist_run(
+      '${A.org}','${ACTIVE_DIRECTION.run}','${ACTIVE_DIRECTION.child}',
+      '${ACTIVE_DIRECTION.attempt}',120);
     insert into public.ai_agents
       (id,organization_id,name,system_prompt,origin,builtin_key,model_binding_mode)
       values ('${BUILTIN.agent}','${A.org}','Built-in Agent','Invariant',
@@ -773,6 +799,56 @@ describe("internal Mission input ledger", () => {
       await expect(submitMissionManagerDirection(pool, { ...input,
         organizationId: B.org, actorUserId: B.user }))
         .rejects.toMatchObject({ code: "not_found" });
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("stops a running root and specialist before accepting a new manager direction", async () => {
+    const pool = new pg.Pool({
+      connectionString: `postgresql://postgres:postgres@127.0.0.1:${process.env.TEST_DB_PORT}/postgres`,
+      max: 2,
+    });
+    try {
+      const changed = await submitMissionManagerDirection(pool, {
+        organizationId: A.org, missionId: ACTIVE_DIRECTION.mission,
+        actorUserId: A.user, requestKey: ACTIVE_DIRECTION.key,
+        content: "停止旧分析，重新核对客户最新需求和商机状态",
+      });
+      expect(changed).toMatchObject({ missionStatus: "queued", customerSendPaused: true });
+      const { rows } = await pool.query<{
+        mission_status: string; root_status: string; child_status: string;
+        child_lease: Date | null; cancelled_events: string;
+      }>(`select m.status as mission_status,r.status as root_status,
+                c.status as child_status,c.execution_lease_expires_at as child_lease,
+                (select count(*)::text from public.ai_agent_run_events e
+                 where e.organization_id=$1 and e.run_id in ($2,$3)
+                   and e.event_type='run_cancelled') as cancelled_events
+           from public.ai_missions m
+           join public.ai_workbench_runs r on r.organization_id=m.organization_id and r.id=$2
+           join public.ai_workbench_runs c on c.organization_id=r.organization_id and c.id=$3
+           where m.organization_id=$1 and m.id=$4`,
+        [A.org, ACTIVE_DIRECTION.run, ACTIVE_DIRECTION.child, ACTIVE_DIRECTION.mission]);
+      expect(rows[0]).toMatchObject({ mission_status: "queued", root_status: "cancelled",
+        child_status: "cancelled", child_lease: null, cancelled_events: "2" });
+      const { rows: reclaimed } = await pool.query(
+        `select execution_attempt_id from public.fn_claim_ai_specialist_run($1,$2,$3,$4,120)`,
+        [A.org, ACTIVE_DIRECTION.run, ACTIVE_DIRECTION.child,
+          "a3910000-9999-4000-8000-000000000017"],
+      );
+      expect(reclaimed).toEqual([]);
+      await expect(pool.query(
+        `insert into public.ai_workbench_runs
+         (organization_id,agent_id,parent_run_id,run_kind,specialist_key,collaboration_key,task,mode)
+         values ($1,$2,$3,'specialist','sales_evidence','manager-replan','迟到的子任务','inspect')`,
+        [A.org, A.agent, ACTIVE_DIRECTION.run],
+      )).rejects.toMatchObject({ code: "23514" });
+      await expect(pool.query(
+        `insert into public.ai_agent_action_proposals
+         (organization_id,run_id,sequence,tool_name,tool_args,preview,status)
+         values ($1,$2,1,'crm_update_lead','{}'::jsonb,'{}'::jsonb,'pending')`,
+        [A.org, ACTIVE_DIRECTION.run],
+      )).rejects.toMatchObject({ code: "23514" });
     } finally {
       await pool.end();
     }
