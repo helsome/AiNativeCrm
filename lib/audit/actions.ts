@@ -799,6 +799,7 @@ export const AUDIT_ACTIONS = [
   "ai_mission.manager_direction",
   "ai_internal.feishu_binding_started",
   "ai_internal.feishu_binding_completed",
+  "ai_mission.explicit_offer_issued",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */

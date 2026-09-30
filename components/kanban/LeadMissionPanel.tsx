@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { randomId } from "@/lib/random-id";
+import { MissionExplicitOfferPanel } from "./MissionExplicitOfferPanel";
 
 type Mission = {
   id: string;
@@ -491,6 +492,8 @@ export function LeadMissionPanel({ leadId, pipelineId, open }: {
                 查看最近一次执行
               </a>
             )}
+            <MissionExplicitOfferPanel missionId={mission.id} leadId={leadId}
+              active={!['completed', 'cancelled'].includes(mission.status)} />
             <button
               disabled={evaluatingId === mission.id}
               onClick={() => void evaluate(mission.id)}
