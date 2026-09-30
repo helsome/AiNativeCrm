@@ -1,5 +1,6 @@
-import type { Pool, PoolClient } from "pg";
+import type { Pool } from "pg";
 import { appendWorkbenchObservation, parseRuntimeMessages } from "@/lib/ai/agents/workbench-state";
+import { appendWorkbenchEventTx } from "@/lib/ai/agents/workbench-transaction-events";
 
 type Outcome = "queued" | "awaiting_confirmation" | "partial";
 type Decision = "approve" | "reject";
@@ -10,25 +11,6 @@ export interface SendDecisionReceipt {
   outcome: Outcome;
   resumeJobId: string | null;
   replayed: boolean;
-}
-
-async function appendEvent(
-  client: PoolClient, organizationId: string, runId: string,
-  type: string, payload: Record<string, unknown>,
-): Promise<void> {
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const { rows } = await client.query(
-      `insert into public.ai_agent_run_events
-       (organization_id,run_id,sequence,event_type,payload)
-       select $1,$2,coalesce(max(sequence),0)+1,$3,$4::jsonb
-       from public.ai_agent_run_events
-       where organization_id=$1 and run_id=$2
-       on conflict (run_id,sequence) do nothing returning sequence`,
-      [organizationId, runId, type, JSON.stringify(payload)],
-    );
-    if (rows.length === 1) return;
-  }
-  throw new Error("workbench_send_decision_event_sequence_race");
 }
 
 /**
@@ -124,7 +106,7 @@ export async function finalizeWorkbenchSendDecision(
          where organization_id=$1 and id=$2 and status='running'`,
         [input.organizationId, input.runId],
       );
-      await appendEvent(client, input.organizationId, input.runId, "run_partial",
+      await appendWorkbenchEventTx(client, input.organizationId, input.runId, "run_partial",
         { status: "partial", reason: "resume_state_missing" });
       outcome = "partial";
     } else {
@@ -139,18 +121,18 @@ export async function finalizeWorkbenchSendDecision(
          where organization_id=$1 and run_id=$2`,
         [input.organizationId, input.runId, JSON.stringify(continued)],
       );
-      await appendEvent(client, input.organizationId, input.runId,
+      await appendWorkbenchEventTx(client, input.organizationId, input.runId,
         "human_confirmation_received", {
           proposalId: input.proposalId, decision,
           ...(decided.decision_by ? { actorUserId: decided.decision_by } : {}),
         });
-      await appendEvent(client, input.organizationId, input.runId,
+      await appendWorkbenchEventTx(client, input.organizationId, input.runId,
         "policy_checked", { proposalId: input.proposalId,
           decision: decision === "approve" ? "approved" : "rejected", tool: "send_message" });
       if (decision === "approve")
-        await appendEvent(client, input.organizationId, input.runId,
+        await appendWorkbenchEventTx(client, input.organizationId, input.runId,
           "tool_started", { proposalId: input.proposalId, tool: "send_message" });
-      await appendEvent(client, input.organizationId, input.runId,
+      await appendWorkbenchEventTx(client, input.organizationId, input.runId,
         "tool_completed", { proposalId: input.proposalId, tool: "send_message",
           status: decision === "approve" ? "queued" : "rejected" });
       const { rows: pending } = await client.query<{ count: number }>(
@@ -189,7 +171,7 @@ export async function finalizeWorkbenchSendDecision(
             throw new Error("workbench_send_decision_queue_conflict");
           resumeJobId = existing[0].id;
         }
-        await appendEvent(client, input.organizationId, input.runId,
+        await appendWorkbenchEventTx(client, input.organizationId, input.runId,
           "run_resumed", { proposalId: input.proposalId });
         outcome = "queued";
       }

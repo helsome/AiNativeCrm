@@ -5,6 +5,8 @@ import { assertWorkbenchJobLease } from "@/lib/ai/agents/workbench-job-lease";
 import {
   finalizeWorkbenchSendDecision, reconcileWorkbenchSendDecisions,
 } from "@/lib/ai/agents/workbench-send-decision-recovery";
+import { rejectWorkbenchProposal } from "@/lib/ai/agents/workbench-reject-decision";
+import { ASK_INTERNAL_COLLEAGUE_TOOL } from "@/lib/ai/agents/internal-question-contract";
 import { criarOrigemDeFollowup } from "./followup-service-origin";
 
 const pool = new pg.Pool({
@@ -116,6 +118,23 @@ async function stagedMission() {
   return { missionId, runId, proposalId, draftId: rows[0]!.draft_id };
 }
 
+async function stagedNonSendMission(toolName = "crm_request_human_handoff") {
+  const f = await stagedMission();
+  await pool.query(
+    "delete from public.ai_reply_drafts where organization_id=$1 and id=$2",
+    [org, f.draftId],
+  );
+  await pool.query(
+    `update public.ai_agent_action_proposals
+     set tool_name=$3,tool_args=$4::jsonb,preview=$5::jsonb
+     where organization_id=$1 and id=$2`,
+    [org, f.proposalId, toolName,
+      JSON.stringify({ question: "Sensitive CRM customer context" }),
+      JSON.stringify({ summary: "Sensitive CRM customer context" })],
+  );
+  return f;
+}
+
 async function current(draftId: string): Promise<boolean> {
   const { rows } = await pool.query<{ current: boolean }>(
     "select public.fn_reply_context_current($1,$2) as current", [org, draftId],
@@ -143,6 +162,176 @@ async function sendCommand(missionId: string, key: string, kind: string,
 }
 
 describe("Mission cancellation fences customer delivery", () => {
+  it("does not commit a customer send when the Run is no longer awaiting confirmation", async () => {
+    const f = await stagedMission();
+    await pool.query(
+      "update public.ai_workbench_runs set status='running' where organization_id=$1 and id=$2",
+      [org, f.runId],
+    );
+    const userDb = await pool.connect();
+    try {
+      await userDb.query("begin");
+      await userDb.query("set local role authenticated");
+      await userDb.query("select set_config('request.jwt.claims',$1,true)", [
+        JSON.stringify({ sub: actor, role: "authenticated", aal: "aal1" }),
+      ]);
+      await expect(userDb.query(
+        "select public.fn_reply_action($1,$2,'1','approve',$3,null)",
+        [org, f.draftId, "Approved quote"],
+      )).rejects.toThrow(/workbench_reply_run_stale/);
+      await userDb.query("rollback");
+      const { rows } = await pool.query<{
+        draft_status: string; proposal_status: string; send_job_id: string | null;
+      }>(
+        `select d.status as draft_status,p.status as proposal_status,d.send_job_id
+         from public.ai_reply_drafts d
+         join public.ai_agent_action_proposals p
+           on p.organization_id=d.organization_id and p.id=d.workbench_proposal_id
+         where d.organization_id=$1 and d.id=$2`,
+        [org, f.draftId],
+      );
+      expect(rows[0]).toEqual({ draft_status: "pending", proposal_status: "pending",
+        send_job_id: null });
+    } finally {
+      userDb.release();
+      await cancel(f.missionId);
+    }
+  });
+
+  it("rejects a non-send proposal, observes it and queues Pi resume atomically", async () => {
+    const f = await stagedNonSendMission();
+    try {
+      expect(await rejectWorkbenchProposal(pool, {
+        organizationId: org, runId: f.runId, proposalId: f.proposalId,
+        actorUserId: actor, reason: "客户明确要求人工接管",
+      })).toMatchObject({ outcome: "queued", toolName: "crm_request_human_handoff" });
+      const { rows } = await pool.query<{
+        proposal_status: string; run_status: string; resume_count: number;
+        observation: string; event_count: number;
+      }>(
+        `select p.status as proposal_status,r.status as run_status,
+                (select count(*)::int from public.job_queue j
+                 where j.organization_id=$1 and j.kind='workbench_resume'
+                   and j.source_event_id=$2) as resume_count,
+                (select messages->-1->>'content' from public.ai_agent_run_states s
+                 where s.organization_id=$1 and s.run_id=$3) as observation,
+                (select count(*)::int from public.ai_agent_run_events e
+                 where e.organization_id=$1 and e.run_id=$3) as event_count
+         from public.ai_agent_action_proposals p
+         join public.ai_workbench_runs r on r.id=p.run_id
+         where p.organization_id=$1 and p.id=$2`,
+        [org, f.proposalId, f.runId],
+      );
+      expect(rows[0]).toMatchObject({ proposal_status: "rejected", run_status: "running",
+        resume_count: 1, event_count: 3 });
+      expect(rows[0]?.observation).toContain('"status":"rejected"');
+      expect(await rejectWorkbenchProposal(pool, {
+        organizationId: org, runId: f.runId, proposalId: f.proposalId,
+        actorUserId: actor,
+      })).toBeNull();
+      expect(await rejectWorkbenchProposal(pool, {
+        organizationId: randomUUID(), runId: f.runId, proposalId: f.proposalId,
+        actorUserId: actor,
+      })).toBeNull();
+    } finally {
+      await cancel(f.missionId);
+    }
+  });
+
+  it("keeps another proposal pending and redacts a rejected internal question", async () => {
+    const f = await stagedNonSendMission(ASK_INTERNAL_COLLEAGUE_TOOL);
+    await pool.query(
+      `insert into public.ai_agent_action_proposals
+       (id,organization_id,run_id,sequence,tool_name,tool_args)
+       values ($1,$2,$3,2,'crm_request_human_handoff','{}'::jsonb)`,
+      [randomUUID(), org, f.runId],
+    );
+    try {
+      expect(await rejectWorkbenchProposal(pool, {
+        organizationId: org, runId: f.runId, proposalId: f.proposalId,
+        actorUserId: actor,
+      })).toMatchObject({ outcome: "awaiting_confirmation" });
+      const { rows } = await pool.query<{
+        status: string; tool_args: object; preview: { redacted: boolean }; run_status: string;
+        resume_count: number;
+      }>(
+        `select p.status,p.tool_args,p.preview,r.status as run_status,
+                (select count(*)::int from public.job_queue j
+                 where j.organization_id=$1 and j.kind='workbench_resume'
+                   and j.source_event_id=$2) as resume_count
+         from public.ai_agent_action_proposals p
+         join public.ai_workbench_runs r on r.id=p.run_id
+         where p.organization_id=$1 and p.id=$2`,
+        [org, f.proposalId],
+      );
+      expect(rows[0]).toMatchObject({ status: "rejected", tool_args: {},
+        preview: { redacted: true }, run_status: "awaiting_confirmation", resume_count: 0 });
+    } finally {
+      await cancel(f.missionId);
+    }
+  });
+
+  it("rolls back rejection if its durable resume job cannot be inserted", async () => {
+    const f = await stagedNonSendMission();
+    await pool.query(
+      `insert into public.job_queue
+       (organization_id,kind,source_event_id,payload,max_attempts)
+       values ($1,'workbench_resume',$2,jsonb_build_object('runId',$3::uuid),3)`,
+      [org, f.proposalId, randomUUID()],
+    );
+    try {
+      await expect(rejectWorkbenchProposal(pool, {
+        organizationId: org, runId: f.runId, proposalId: f.proposalId,
+        actorUserId: actor,
+      })).rejects.toThrow();
+      const { rows } = await pool.query<{ proposal_status: string; run_status: string;
+        event_count: number; messages_count: number }>(
+        `select p.status as proposal_status,r.status as run_status,
+                (select count(*)::int from public.ai_agent_run_events e
+                 where e.organization_id=$1 and e.run_id=$2) as event_count,
+                (select jsonb_array_length(messages) from public.ai_agent_run_states s
+                 where s.organization_id=$1 and s.run_id=$2) as messages_count
+         from public.ai_agent_action_proposals p
+         join public.ai_workbench_runs r on r.id=p.run_id
+         where p.organization_id=$1 and p.id=$3`,
+        [org, f.runId, f.proposalId],
+      );
+      expect(rows[0]).toEqual({ proposal_status: "pending",
+        run_status: "awaiting_confirmation", event_count: 0, messages_count: 2 });
+    } finally {
+      await cancel(f.missionId);
+    }
+  });
+
+  it("ends partial without a resume job when rejection finds no Pi state", async () => {
+    const f = await stagedNonSendMission();
+    await pool.query(
+      "delete from public.ai_agent_run_states where organization_id=$1 and run_id=$2",
+      [org, f.runId],
+    );
+    try {
+      expect(await rejectWorkbenchProposal(pool, {
+        organizationId: org, runId: f.runId, proposalId: f.proposalId,
+        actorUserId: actor,
+      })).toMatchObject({ outcome: "partial" });
+      const { rows } = await pool.query<{ proposal_status: string; run_status: string;
+        error_code: string; resume_count: number }>(
+        `select p.status as proposal_status,r.status as run_status,r.error_code,
+                (select count(*)::int from public.job_queue j
+                 where j.organization_id=$1 and j.kind='workbench_resume'
+                   and j.source_event_id=$2) as resume_count
+         from public.ai_agent_action_proposals p
+         join public.ai_workbench_runs r on r.id=p.run_id
+         where p.organization_id=$1 and p.id=$2`,
+        [org, f.proposalId],
+      );
+      expect(rows[0]).toEqual({ proposal_status: "rejected", run_status: "partial",
+        error_code: "resume_state_missing", resume_count: 0 });
+    } finally {
+      await cancel(f.missionId);
+    }
+  });
+
   it("keeps send-decision recovery receipts service-only", async () => {
     const { rows } = await pool.query<{
       anon_select: boolean; user_select: boolean; user_insert: boolean; service_insert: boolean;

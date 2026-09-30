@@ -37506,6 +37506,37 @@ revoke all on public.ai_workbench_send_decision_receipts from public,anon,authen
 grant select,insert on public.ai_workbench_send_decision_receipts to service_role;
 notify pgrst, 'reload schema';
 
+-- 0401 — claim a waiting Run in the same transaction as reply approval.
+create or replace function public.fn_reply_workbench_decision_bridge()
+returns trigger language plpgsql security definer set search_path=public as $$
+declare target_status text;
+begin
+  if old.status='pending' and new.workbench_proposal_id is not null
+     and new.status in ('approved','dismissed') then
+    target_status:=case when new.status='approved' then 'executed' else 'rejected' end;
+    update public.ai_agent_action_proposals
+      set status=target_status,
+          decision_by=coalesce(new.approved_by,auth.uid()),
+          decision_reason=case when new.status='dismissed' then left(new.feedback->>'reason',1000) else null end,
+          decision_at=coalesce(new.approved_at,now()),
+          result_summary=case when new.status='approved'
+            then jsonb_build_object('outcome','queued','sendJobId',new.send_job_id)
+            else jsonb_build_object('outcome','rejected') end
+      where organization_id=new.organization_id and run_id=new.workbench_run_id
+        and id=new.workbench_proposal_id and status='pending';
+    if not found then raise exception 'workbench_reply_proposal_stale' using errcode='40001'; end if;
+    update public.ai_workbench_runs set status='running'
+      where organization_id=new.organization_id and id=new.workbench_run_id
+        and status='awaiting_confirmation';
+    if not found then raise exception 'workbench_reply_run_stale' using errcode='40001'; end if;
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public.fn_reply_workbench_decision_bridge()
+  from public,anon,authenticated;
+notify pgrst, 'reload schema';
+
 -- ---- VARREDURA anon: fecha os apêndices posteriores à migration 0116 ----
 -- O bloco original 0116 precede as migrations acrescentadas ao baseline ao
 -- longo do tempo. Reaplicar a mesma cura no fim mantém seguro também o caminho

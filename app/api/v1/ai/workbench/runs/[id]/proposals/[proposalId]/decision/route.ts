@@ -24,6 +24,7 @@ import {
   approveProposedFeishuQuestion, InternalQuestionError,
 } from "@/lib/ai/internal-collaboration/feishu-question";
 import { finalizeWorkbenchSendDecision } from "@/lib/ai/agents/workbench-send-decision-recovery";
+import { rejectWorkbenchProposal } from "@/lib/ai/agents/workbench-reject-decision";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -150,18 +151,51 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<Response> {
     }
   }
 
-  // Compare-and-set the run to serialize approvals and prevent duplicate writes
-  // when two browser tabs decide at the same time.
-  const { data: claimed } = await admin
-    .from("ai_workbench_runs")
-    .update({ status: "running" })
-    .eq("organization_id", authz.org.orgId)
-    .eq("id", id)
-    .eq("status", "awaiting_confirmation")
-    .select("id")
-    .maybeSingle();
-  if (!claimed)
-    return fail("state_conflict", "另一个决策正在处理，请刷新运行详情。", 409, { requestId });
+  if (parsed.data.decision === "reject" && proposal.tool_name !== "send_message") {
+    try {
+      const result = await rejectWorkbenchProposal(getRequestPool(), {
+        organizationId: authz.org.orgId,
+        runId: id,
+        proposalId,
+        actorUserId: authz.user.id,
+        reason: parsed.data.reason,
+      });
+      if (!result)
+        return fail("state_conflict", "任务或提案状态已变化，请刷新运行详情。", 409,
+          { requestId });
+      void audit({
+        action: "ai_workbench.action_rejected",
+        actorUserId: authz.user.id,
+        organizationId: authz.org.orgId,
+        resourceType: "ai_agent_action_proposal",
+        resourceId: proposalId,
+        requestId,
+        metadata: { run_id: id, tool: result.toolName },
+      });
+      return ok({ proposal_id: proposalId, status: "rejected",
+        run_status: result.outcome === "queued" ? "running" : result.outcome },
+      { requestId });
+    } catch {
+      return fail("decision_state_unknown", "拒绝决定状态暂未确认，请刷新运行详情。", 503,
+        { requestId });
+    }
+  }
+
+  if (proposal.tool_name !== "send_message") {
+    // Non-send approvals still execute their tool after this claim. Rejections
+    // above have their own atomic transaction, while the reply draft trigger
+    // below claims the send decision in the same transaction as its outbox.
+    const { data: claimed } = await admin
+      .from("ai_workbench_runs")
+      .update({ status: "running" })
+      .eq("organization_id", authz.org.orgId)
+      .eq("id", id)
+      .eq("status", "awaiting_confirmation")
+      .select("id")
+      .maybeSingle();
+    if (!claimed)
+      return fail("state_conflict", "另一个决策正在处理，请刷新运行详情。", 409, { requestId });
+  }
 
   if (parsed.data.decision === "approve" && run.mission_id) {
     const { data: mission, error: missionError } = await admin.from("ai_missions")
@@ -170,7 +204,8 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<Response> {
       .eq("id", run.mission_id)
       .maybeSingle();
     if (missionError || !mission || ["cancelled", "completed"].includes(mission.status)) {
-      await restoreAwaitingConfirmation(admin, authz.org.orgId, id);
+      if (proposal.tool_name !== "send_message")
+        await restoreAwaitingConfirmation(admin, authz.org.orgId, id);
       return fail("mission_not_active", "业务任务已停止，不能再批准关联动作。", 409, { requestId });
     }
   }
@@ -196,7 +231,6 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<Response> {
       .eq("workbench_proposal_id", proposalId)
       .maybeSingle();
     if (!draft || !validatedArgs.ok || draft.original_body !== validatedArgs.args.body) {
-      await restoreAwaitingConfirmation(admin, authz.org.orgId, id);
       return fail("reply_draft_missing", "已确认的回复草稿不可用；没有创建发送任务。", 409, {
         requestId,
       });
@@ -219,7 +253,6 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<Response> {
         .eq("id", proposalId)
         .maybeSingle();
       if (changed?.status !== (decision === "approve" ? "executed" : "rejected")) {
-        await restoreAwaitingConfirmation(admin, authz.org.orgId, id);
         return fail(
           actionError.message.includes("stale") ? "reply_context_stale" : "reply_not_authorized",
           actionError.message.includes("stale")
@@ -266,36 +299,6 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<Response> {
       run_status: receipt.outcome === "queued" ? "running"
         : receipt.outcome === "awaiting_confirmation" ? "awaiting_confirmation" : "partial",
     }, { requestId });
-  } else if (decision === "reject") {
-    const { data: rejected } = await admin
-      .from("ai_agent_action_proposals")
-      .update({
-        status: "rejected",
-        decision_by: authz.user.id,
-        decision_reason: parsed.data.reason ?? null,
-        decision_at: decidedAt,
-        result_summary: { outcome: "rejected" },
-        ...(proposal.tool_name === ASK_INTERNAL_COLLEAGUE_TOOL
-          ? { tool_args: {}, preview: { externalEffect: "feishu_internal_question",
-              requiresHumanConfirmation: true, redacted: true } }
-          : {}),
-      })
-      .eq("organization_id", authz.org.orgId)
-      .eq("id", proposalId)
-      .eq("status", "pending")
-      .select("id")
-      .maybeSingle();
-    if (!rejected) {
-      await restoreAwaitingConfirmation(admin, authz.org.orgId, id);
-      return fail("state_conflict", "这个动作已被其他请求处理。", 409, { requestId });
-    }
-    observation = { tool: proposal.tool_name, status: "rejected" };
-    await appendWorkbenchEvent(admin, {
-      organizationId: authz.org.orgId,
-      runId: id,
-      type: "human_confirmation_received",
-      payload: { proposalId, decision, actorUserId: authz.user.id },
-    });
   } else {
     const state = run.runtime_state as { versionId?: unknown };
     if (typeof state?.versionId !== "string") {
@@ -453,17 +456,6 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<Response> {
       await mcp?.cleanup();
     }
   }
-
-  if (decision === "reject")
-    void audit({
-      action: "ai_workbench.action_rejected",
-      actorUserId: authz.user.id,
-      organizationId: authz.org.orgId,
-      resourceType: "ai_agent_action_proposal",
-      resourceId: proposalId,
-      requestId,
-      metadata: { run_id: id, tool: proposal.tool_name },
-    });
 
   const { data: runState } = await admin
     .from("ai_agent_run_states")
