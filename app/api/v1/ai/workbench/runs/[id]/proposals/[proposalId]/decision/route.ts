@@ -7,7 +7,7 @@ import { requireRole } from "@/lib/auth/require-role";
 import { appendWorkbenchEvent } from "@/lib/ai/agents/workbench-events";
 import { appendWorkbenchObservation, parseRuntimeMessages } from "@/lib/ai/agents/workbench-state";
 import { resolveWorkbenchScope } from "@/lib/ai/agents/workbench-scope";
-import { executeReversibleLeadUpdate } from "@/lib/ai/agents/reversible-lead-update";
+import { executeApprovedWorkbenchTool } from "@/lib/ai/agents/approved-workbench-tool";
 import { workbenchToolEffect } from "@/lib/ai/agents/tool-effects";
 import { validateWorkbenchToolArgs } from "@/lib/ai/agents/validate-workbench-tool-args";
 import { requestTurnDeps } from "@/lib/agent-engine/agent/request-deps";
@@ -361,22 +361,11 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<Response> {
       payload: { proposalId, tool: proposal.tool_name },
     });
     try {
-      const reversible =
-        proposal.tool_name === "crm_update_lead"
-          ? await executeReversibleLeadUpdate({
-              args: validatedArgs?.ok ? validatedArgs.args : proposal.tool_args,
-              tools: mcp.tools as never,
-            })
-          : null;
-      const output =
-        reversible?.result ??
-        (await tool.execute(validatedArgs?.ok ? validatedArgs.args : proposal.tool_args, {
-          toolCallId: randomUUID(),
-          messages: [],
-          context: {},
-        }));
-      const result = output as { isError?: boolean; ok?: boolean } | null;
-      if (result?.isError || result?.ok === false) throw new Error("crm_tool_reported_error");
+      const { output, reversible } = await executeApprovedWorkbenchTool({
+        toolName: proposal.tool_name,
+        args: validatedArgs?.ok ? validatedArgs.args : proposal.tool_args,
+        tools: mcp.tools as never,
+      });
       observation = { tool: proposal.tool_name, status: "executed", result: output };
       const { error } = await admin
         .from("ai_agent_action_proposals")
