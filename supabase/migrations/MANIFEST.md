@@ -19,6 +19,7 @@
 | `20260930070000` | `0397_ai_mission_manager_followups` | Mission 内部输入账本增加种类，区分待核查同事事实与负责人可信任务方向。方向原文进入经理可见的 Mission 任务记忆与新 Run；幂等账本及事件只存摘要或身份。方向提交会原子暂停旧客户发送，旧审批不能用于新要求；后续客户回复或内部资料唤醒须继续携带当前方向。 |
 | `20260930080000` | `0398_ai_mission_direction_specialist_fence` | 负责人运行中改方向时，旧 root 与只读 specialist 子运行在同一事务取消。数据库在子运行创建、重领前锁定并核验父 root 未取消，阻止旧 Worker 在取消后复活 specialist。 |
 | `20260930090000` | `0399_ai_mission_direction_consumption` | 区分负责人方向“已接受”与“模型已消费”：方向输入绑定修订，Mission 记录已消费修订；只有成功模型回合确实带有当前方向时，Worker 才把私有 transcript、方向确认和不含原文的 Run 事件同事务提交。 |
+| `20260930100000` | `0400_workbench_send_decision_recovery` | 客户回复审批与 Pi 续跑之间增加服务端私有幂等回执；批准后请求中断时，Worker 可从提案和草稿事实恢复观察结果与队列任务，不重复发送。 |
 
 Migrations applied to Supabase project `rrydmwnporysaiysiztn` (sa-east-1, Postgres 17) via Supabase MCP on 2026-04-28.
 

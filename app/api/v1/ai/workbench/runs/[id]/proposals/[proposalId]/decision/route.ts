@@ -23,6 +23,7 @@ import { ASK_INTERNAL_COLLEAGUE_TOOL } from "@/lib/ai/agents/internal-question-c
 import {
   approveProposedFeishuQuestion, InternalQuestionError,
 } from "@/lib/ai/internal-collaboration/feishu-question";
+import { finalizeWorkbenchSendDecision } from "@/lib/ai/agents/workbench-send-decision-recovery";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -201,7 +202,7 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<Response> {
       });
     }
     const userDb = await createClient();
-    const { data: jobId, error: actionError } = await userDb.rpc("fn_reply_action", {
+    const { error: actionError } = await userDb.rpc("fn_reply_action", {
       p_org: authz.org.orgId,
       p_id: draft.id,
       p_revision: String(draft.revision),
@@ -228,52 +229,24 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<Response> {
           { requestId },
         );
       }
-      observation = {
-        tool: proposal.tool_name,
-        status: decision === "approve" ? "executed" : "rejected",
-        ...(decision === "approve" ? { result: changed.result_summary } : {}),
-      };
-    } else {
-      observation = {
-        tool: proposal.tool_name,
-        status: decision === "approve" ? "executed" : "rejected",
-        ...(decision === "approve" ? { result: { delivery: "queued", jobId } } : {}),
-      };
     }
-    await appendWorkbenchEvent(admin, {
-      organizationId: authz.org.orgId,
-      runId: id,
-      type: "human_confirmation_received",
-      payload: { proposalId, decision, actorUserId: authz.user.id },
-    });
-    await appendWorkbenchEvent(admin, {
-      organizationId: authz.org.orgId,
-      runId: id,
-      type: "policy_checked",
-      payload: {
-        proposalId,
-        decision: decision === "approve" ? "approved" : "rejected",
-        tool: proposal.tool_name,
-      },
-    });
-    if (decision === "approve") {
-      await appendWorkbenchEvent(admin, {
-        organizationId: authz.org.orgId,
-        runId: id,
-        type: "tool_started",
-        payload: { proposalId, tool: proposal.tool_name },
+    // fn_reply_action atomically persists the draft, proposal and delivery
+    // job. A process can die before the Pi observation/next job; the Worker
+    // calls this same idempotent finalizer from the durable proposal facts.
+    let receipt: Awaited<ReturnType<typeof finalizeWorkbenchSendDecision>>;
+    try {
+      receipt = await finalizeWorkbenchSendDecision(getRequestPool(), {
+        organizationId: authz.org.orgId, runId: id, proposalId,
       });
+    } catch {
+      return fail("send_continuation_pending_recovery",
+        "发送决定已记录；续跑状态暂未确认，后台将从已保存的决定恢复。", 503,
+        { requestId });
     }
-    await appendWorkbenchEvent(admin, {
-      organizationId: authz.org.orgId,
-      runId: id,
-      type: "tool_completed",
-      payload: {
-        proposalId,
-        tool: proposal.tool_name,
-        status: decision === "approve" ? "queued" : "rejected",
-      },
-    });
+    if (!receipt)
+      return fail("send_continuation_state_conflict",
+        "发送决定已记录，但运行状态已变化；请核对任务与客户发送记录。", 409,
+        { requestId });
     void audit({
       action:
         decision === "approve" ? "ai_workbench.action_approved" : "ai_workbench.action_rejected",
@@ -288,6 +261,11 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<Response> {
         delivery: decision === "approve" ? "queued" : "not_sent",
       },
     });
+    return ok({ proposal_id: proposalId,
+      status: decision === "approve" ? "executed" : "rejected",
+      run_status: receipt.outcome === "queued" ? "running"
+        : receipt.outcome === "awaiting_confirmation" ? "awaiting_confirmation" : "partial",
+    }, { requestId });
   } else if (decision === "reject") {
     const { data: rejected } = await admin
       .from("ai_agent_action_proposals")

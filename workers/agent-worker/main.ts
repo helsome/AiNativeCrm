@@ -84,6 +84,7 @@ import { createCaseReplyTurnHandler } from "@/lib/agent-engine/agent/case-reply-
 import { createOperatorTurnHandler } from "@/lib/agent-engine/agent/operator-turn";
 import { runWorkbenchResumeJob } from "@/lib/ai/agents/workbench-resume-job";
 import { runWorkbenchStartJob } from "@/lib/ai/agents/workbench-start-job";
+import { reconcileWorkbenchSendDecisions } from "@/lib/ai/agents/workbench-send-decision-recovery";
 import { runMissionDeadlineLoop } from "@/lib/ai/agents/mission-deadlines";
 import {
   expireFeishuInboxPayloads,
@@ -300,6 +301,8 @@ export async function startWorker(
   await expireFeishuInboxPayloads(pool);
   await reconcileDeadFeishuQuestionJobs(pool);
   await expireFeishuQuestionPayloads(pool);
+  await reconcileWorkbenchSendDecisions(pool, 20, (failure) =>
+    log.error("workbench 发送决定续跑恢复失败", failure));
 
   // O comportamento da INSTALAÇÃO entra no processo ANTES dos laços que
   // consomem turnos: a releitura abaixo só acontece no primeiro tique do reaper
@@ -335,6 +338,8 @@ export async function startWorker(
         await expireFeishuInboxPayloads(pool);
         await reconcileDeadFeishuQuestionJobs(pool);
         await expireFeishuQuestionPayloads(pool);
+        await reconcileWorkbenchSendDecisions(pool, 20, (failure) =>
+          log.error("workbench 发送决定续跑恢复失败", failure));
       })
       .catch((err: unknown) => log.error("reaper falhou", { error: errMsg(err) }));
   }, env.QUEUE_REAPER_INTERVAL_MS);
