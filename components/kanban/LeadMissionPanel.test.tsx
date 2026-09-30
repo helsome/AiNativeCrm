@@ -54,6 +54,22 @@ describe("LeadMissionPanel internal information", () => {
     expect(fetch.mock.calls[1]?.[0]).toBe(`/api/v1/ai/missions/${MISSION}/follow-up`);
   });
 
+  it("distinguishes an accepted direction from one consumed by the model", async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(response([
+      { id: MISSION, goal: "报价 A", acceptance_criteria: "客户确认", status: "queued",
+        current_direction: "先核对报价", direction_revision: 2,
+        direction_consumed_revision: 1, latest_run_id: "run-a" },
+      { id: "44444444-4444-4444-8444-444444444444", goal: "报价 B",
+        acceptance_criteria: "客户确认", status: "running",
+        current_direction: "先核对合同", direction_revision: 3,
+        direction_consumed_revision: 3, latest_run_id: "run-b" },
+    ]));
+    vi.stubGlobal("fetch", fetch);
+    render(<LeadMissionPanel leadId="lead-a" pipelineId="pipeline-a" open />);
+    expect(await screen.findByText("新方向已接受，等待模型消费")).toBeInTheDocument();
+    expect(screen.getByText("新方向已由模型读取（不等于业务完成）")).toBeInTheDocument();
+  });
+
   it("offers a replacement direction while an old action is waiting for approval", async () => {
     const fetch = vi.fn()
       .mockResolvedValueOnce(response([{ id: MISSION, goal: "核对交期", acceptance_criteria: "客户确认",

@@ -228,7 +228,10 @@ function runtimeEvent(event: AgentEvent): AgentRuntimeEvent {
     case "agent_end":
       return { type: event.type, data: { message_count: event.messages.length } };
     case "turn_end":
-      return { type: event.type, data: { tool_result_count: event.toolResults.length } };
+      return { type: event.type, data: {
+        tool_result_count: event.toolResults.length,
+        stop_reason: event.message.role === "assistant" ? event.message.stopReason : null,
+      } };
     case "message_start":
     case "message_end":
       return { type: event.type, data: { role: event.message.role } };

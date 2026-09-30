@@ -1,4 +1,5 @@
 import { appendWorkbenchEvent } from "@/lib/ai/agents/workbench-events";
+import { persistMissionRunMessagesAndDirectionAck } from "@/lib/ai/agents/mission-direction-consumption";
 import { MissionBudgetExceededError } from "@/lib/ai/agents/mission-budget";
 import { continueWorkbenchMessages } from "@/lib/ai/agents/workbench-state";
 import { executeReversibleLeadUpdate } from "@/lib/ai/agents/reversible-lead-update";
@@ -241,11 +242,20 @@ export async function runResumedWorkbenchTurn(input: {
         },
     } satisfies RunModelCallInput;
     const firstModelResult = await executePiTurnModelCall(modelDeps, modelCallInput);
-    const { error: stateError } = await admin.from("ai_agent_run_states").upsert(
-      { organization_id: organizationId, run_id: runId, messages: firstModelResult.result.runtimeMessages as never },
-      { onConflict: "run_id" },
-    );
-    if (stateError) throw new Error("workbench_runtime_state_persist_failed");
+    if (input.missionId) {
+      await persistMissionRunMessagesAndDirectionAck(getRequestPool(), {
+        organizationId, missionId: input.missionId, runId,
+        expectedRevision: input.runtimeState.directionRevision,
+        messages: firstModelResult.result.runtimeMessages,
+        events: firstModelResult.events,
+      });
+    } else {
+      const { error: stateError } = await admin.from("ai_agent_run_states").upsert(
+        { organization_id: organizationId, run_id: runId, messages: firstModelResult.result.runtimeMessages as never },
+        { onConflict: "run_id" },
+      );
+      if (stateError) throw new Error("workbench_runtime_state_persist_failed");
+    }
     const recovery = await recoverWorkbenchResult({
       deps: modelDeps,
       first: firstModelResult,
@@ -260,11 +270,20 @@ export async function runResumedWorkbenchTurn(input: {
     const modelResult = recovery.call;
     if (modelResult !== firstModelResult) {
       await input.beforeSideEffect?.();
-      const { error: recoveredStateError } = await admin.from("ai_agent_run_states").upsert(
-        { organization_id: organizationId, run_id: runId, messages: modelResult.result.runtimeMessages as never },
-        { onConflict: "run_id" },
-      );
-      if (recoveredStateError) throw new Error("workbench_runtime_state_persist_failed");
+      if (input.missionId) {
+        await persistMissionRunMessagesAndDirectionAck(getRequestPool(), {
+          organizationId, missionId: input.missionId, runId,
+          expectedRevision: input.runtimeState.directionRevision,
+          messages: modelResult.result.runtimeMessages,
+          events: modelResult.events,
+        });
+      } else {
+        const { error: recoveredStateError } = await admin.from("ai_agent_run_states").upsert(
+          { organization_id: organizationId, run_id: runId, messages: modelResult.result.runtimeMessages as never },
+          { onConflict: "run_id" },
+        );
+        if (recoveredStateError) throw new Error("workbench_runtime_state_persist_failed");
+      }
     }
     await appendWorkbenchEvent(admin, {
       organizationId, runId, type: "model_decision", payload: { resultRecovery: recovery.state },

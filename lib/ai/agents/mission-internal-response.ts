@@ -49,6 +49,7 @@ interface InternalResponseResult {
   missionStatus: string;
   customerSendPaused: boolean;
   replayed: boolean;
+  directionRevision?: number;
 }
 
 /**
@@ -264,6 +265,7 @@ async function submitMissionContinuationInput(
         missionStatus: mission.status,
         customerSendPaused: mission.customer_send_paused === true,
         replayed: true,
+        ...(kind === "manager_direction" ? { directionRevision: priorDirectionRevision } : {}),
       };
     }
 
@@ -448,11 +450,12 @@ async function submitMissionContinuationInput(
     await client.query(
       `insert into public.ai_mission_internal_inputs
        (id,organization_id,mission_id,request_key,actor_user_id,run_id,content_digest,
-        source_provider,source_tenant_key,source_event_id,kind)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        source_provider,source_tenant_key,source_event_id,direction_revision,kind)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
       [inputId, input.organizationId, mission.id, input.requestKey, input.actorUserId,
         runId, digest, input.source?.provider ?? null, input.source?.tenantKey ?? null,
-        input.source?.eventId ?? null, kind],
+        input.source?.eventId ?? null,
+        kind === "manager_direction" ? priorDirectionRevision + 1 : null, kind],
     );
     await client.query(
       `insert into public.ai_agent_run_events
@@ -474,7 +477,9 @@ async function submitMissionContinuationInput(
     await client.query("commit");
     return { missionId: mission.id, runId, runStatus: "queued", missionStatus: "queued",
       customerSendPaused: kind === "manager_direction" || mission.customer_send_paused === true,
-      replayed: false };
+      replayed: false,
+      ...(kind === "manager_direction"
+        ? { directionRevision: priorDirectionRevision + 1 } : {}) };
   } catch (error) {
     await client.query("rollback");
     if (kind === "manager_direction" && (error as { code?: string })?.code === "55P03")

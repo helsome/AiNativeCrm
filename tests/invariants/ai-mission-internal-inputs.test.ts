@@ -3,6 +3,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { submitMissionInternalResponse,
   submitMissionManagerDirection } from "@/lib/ai/agents/mission-internal-response";
+import { persistMissionRunMessagesAndDirectionAck } from
+  "@/lib/ai/agents/mission-direction-consumption";
 import { submitFeishuMissionText } from "@/lib/ai/internal-collaboration/feishu-mission";
 import { persistFeishuMissionEvent } from "@/lib/ai/internal-collaboration/feishu-mission";
 import {
@@ -83,6 +85,19 @@ const ACTIVE_DIRECTION = {
   child: "a3910000-8888-4000-8000-000000000016",
   attempt: "a3910000-9999-4000-8000-000000000016",
   key: "a3910000-bbbb-4000-8000-000000000016",
+};
+const CONSUMPTION = {
+  lead: "a3910000-4444-4000-8000-000000000018",
+  mission: "a3910000-6666-4000-8000-000000000018",
+  run: "a3910000-7777-4000-8000-000000000018",
+  marker: "a3910000-aaaa-4000-8000-000000000018",
+  key: "a3910000-bbbb-4000-8000-000000000018",
+  direction: "先核对最新版报价，再联系客户",
+};
+const CONSUMPTION_MISSING = {
+  lead: "a3910000-4444-4000-8000-000000000019",
+  mission: "a3910000-6666-4000-8000-000000000019",
+  run: "a3910000-7777-4000-8000-000000000019",
 };
 const DIRECTION_FENCE = {
   lead: "a3910000-4444-4000-8000-000000000015",
@@ -245,6 +260,31 @@ beforeAll(() => {
     select execution_attempt_id from public.fn_claim_ai_specialist_run(
       '${A.org}','${ACTIVE_DIRECTION.run}','${ACTIVE_DIRECTION.child}',
       '${ACTIVE_DIRECTION.attempt}',120);
+    insert into public.crm_leads(id,organization_id,pipeline_id,stage_id,title) values
+      ('${CONSUMPTION.lead}','${A.org}','${A.pipeline}','${A.stage}','Consumption evidence'),
+      ('${CONSUMPTION_MISSING.lead}','${A.org}','${A.pipeline}','${A.stage}','Missing context');
+    insert into public.ai_missions
+      (id,organization_id,lead_id,actor_user_id,goal,acceptance_criteria,current_direction,direction_revision)
+    values
+      ('${CONSUMPTION.mission}','${A.org}','${CONSUMPTION.lead}','${A.user}',
+       '核对报价','客户确认','${CONSUMPTION.direction}',1),
+      ('${CONSUMPTION_MISSING.mission}','${A.org}','${CONSUMPTION_MISSING.lead}','${A.user}',
+       '核对报价','客户确认','先核对合同条款',1);
+    insert into public.ai_workbench_runs
+      (id,organization_id,agent_id,mission_id,actor_user_id,task,mode,status,runtime_state)
+    values
+      ('${CONSUMPTION.run}','${A.org}','${A.agent}','${CONSUMPTION.mission}','${A.user}',
+       '按负责人方向继续','act','running','{"versionId":"${CONTINUATION.version}","directionRevision":1}'),
+      ('${CONSUMPTION_MISSING.run}','${A.org}','${A.agent}','${CONSUMPTION_MISSING.mission}',
+       '${A.user}','按负责人方向继续','act','running',
+       '{"versionId":"${CONTINUATION.version}","directionRevision":1}');
+    insert into public.ai_mission_internal_inputs
+      (id,organization_id,mission_id,request_key,actor_user_id,run_id,content_digest,direction_revision,kind)
+    values ('${CONSUMPTION.marker}','${A.org}','${CONSUMPTION.mission}',
+      '${CONSUMPTION.key}','${A.user}','${CONSUMPTION.run}',repeat('a',64),1,'manager_direction');
+    insert into public.ai_agent_run_events
+      (organization_id,run_id,sequence,event_type,payload)
+    values ('${A.org}','${CONSUMPTION.run}',1,'run_started','{}'::jsonb);
     insert into public.ai_agents
       (id,organization_id,name,system_prompt,origin,builtin_key,model_binding_mode)
       values ('${BUILTIN.agent}','${A.org}','Built-in Agent','Invariant',
@@ -548,7 +588,8 @@ describe("internal Mission input ledger", () => {
           raise exception 'duplicate request accepted';
         exception when unique_violation then null; end;
       end $$;
-      select count(*) from public.ai_mission_internal_inputs;
+      select count(*) from public.ai_mission_internal_inputs
+      where organization_id='${A.org}' and mission_id='${A.mission}';
     `).split("\n").at(-1);
     expect(result).toBe("1");
   });
@@ -849,6 +890,80 @@ describe("internal Mission input ledger", () => {
          values ($1,$2,1,'crm_update_lead','{}'::jsonb,'{}'::jsonb,'pending')`,
         [A.org, ACTIVE_DIRECTION.run],
       )).rejects.toMatchObject({ code: "23514" });
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("commits a direction acknowledgement only with the successful private transcript", async () => {
+    const pool = new pg.Pool({
+      connectionString: `postgresql://postgres:postgres@127.0.0.1:${process.env.TEST_DB_PORT}/postgres`,
+      max: 2,
+    });
+    const messages = [
+      { role: "user" as const,
+        content: `负责人新方向：${JSON.stringify(CONSUMPTION.direction)}` },
+      { role: "assistant" as const, content: "已读取并核对最新报价" },
+    ];
+    const events = [{ type: "turn_end" as const, data: { stop_reason: "stop" } }];
+    try {
+      const input = { organizationId: A.org, missionId: CONSUMPTION.mission,
+        runId: CONSUMPTION.run, expectedRevision: 1, messages, events };
+      expect(await persistMissionRunMessagesAndDirectionAck(pool, input))
+        .toEqual({ acknowledged: true });
+      expect(await persistMissionRunMessagesAndDirectionAck(pool, input))
+        .toEqual({ acknowledged: false });
+      const { rows } = await pool.query<{
+        consumed_revision: string; consumed_at: Date | null;
+        state_messages: unknown; event_count: string; event_payload: string;
+      }>(`select m.direction_consumed_revision::text as consumed_revision,i.consumed_at,
+                s.messages as state_messages,
+                (select count(*)::text from public.ai_agent_run_events e
+                 where e.organization_id=$1 and e.run_id=$2
+                   and e.event_type='manager_direction_consumed') as event_count,
+                (select e.payload::text from public.ai_agent_run_events e
+                 where e.organization_id=$1 and e.run_id=$2
+                   and e.event_type='manager_direction_consumed') as event_payload
+           from public.ai_missions m
+           join public.ai_mission_internal_inputs i
+             on i.organization_id=m.organization_id and i.mission_id=m.id
+           join public.ai_agent_run_states s
+             on s.organization_id=i.organization_id and s.run_id=i.run_id
+           where m.organization_id=$1 and m.id=$3`,
+        [A.org, CONSUMPTION.run, CONSUMPTION.mission]);
+      expect(rows[0]).toMatchObject({ consumed_revision: "1", event_count: "1" });
+      expect(rows[0]?.consumed_at).not.toBeNull();
+      expect(rows[0]?.state_messages).toEqual(messages);
+      expect(rows[0]?.event_payload).not.toContain(CONSUMPTION.direction);
+      await expect(persistMissionRunMessagesAndDirectionAck(pool, {
+        ...input, organizationId: B.org,
+      })).rejects.toMatchObject({ code: "run_inactive" });
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("does not persist state or acknowledge a direction missing from model context", async () => {
+    const pool = new pg.Pool({
+      connectionString: `postgresql://postgres:postgres@127.0.0.1:${process.env.TEST_DB_PORT}/postgres`,
+      max: 2,
+    });
+    try {
+      await expect(persistMissionRunMessagesAndDirectionAck(pool, {
+        organizationId: A.org, missionId: CONSUMPTION_MISSING.mission,
+        runId: CONSUMPTION_MISSING.run, expectedRevision: 1,
+        messages: [{ role: "user", content: "旧任务，不含负责人新方向" },
+          { role: "assistant", content: "继续旧计划" }],
+        events: [{ type: "turn_end", data: { stop_reason: "stop" } }],
+      })).rejects.toMatchObject({ code: "context_missing" });
+      const { rows } = await pool.query<{ consumed_revision: string; state_count: string }>(
+        `select m.direction_consumed_revision::text as consumed_revision,
+                (select count(*)::text from public.ai_agent_run_states s
+                 where s.organization_id=$1 and s.run_id=$2) as state_count
+         from public.ai_missions m where m.organization_id=$1 and m.id=$3`,
+        [A.org, CONSUMPTION_MISSING.run, CONSUMPTION_MISSING.mission],
+      );
+      expect(rows[0]).toEqual({ consumed_revision: "0", state_count: "0" });
     } finally {
       await pool.end();
     }

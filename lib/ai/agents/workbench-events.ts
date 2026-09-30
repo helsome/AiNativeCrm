@@ -22,6 +22,7 @@ export type CrmAgentEventType =
   | "specialist_failed"
   | "collaboration_conflict"
   | "collaboration_completed"
+  | "manager_direction_consumed"
   | "usage_reported";
 
 const EVENT_FIELDS: Record<CrmAgentEventType, readonly string[]> = {
@@ -67,6 +68,7 @@ const EVENT_FIELDS: Record<CrmAgentEventType, readonly string[]> = {
     "toolCalls",
     "conflictCount",
   ],
+  manager_direction_consumed: ["directionId", "directionRevision"],
   usage_reported: ["inputTokens", "outputTokens", "costCents", "calls"],
 };
 

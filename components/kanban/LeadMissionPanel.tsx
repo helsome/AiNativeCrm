@@ -8,6 +8,8 @@ type Mission = {
   goal: string;
   acceptance_criteria: string;
   current_direction?: string | null;
+  direction_revision?: number;
+  direction_consumed_revision?: number;
   status: string;
   blocked_reason: string | null;
   resolution_reason: string | null;
@@ -129,21 +131,30 @@ export function LeadMissionPanel({ leadId, pipelineId, open }: {
   useEffect(() => {
     if (!open) return;
     let active = true;
-    void fetch(`/api/v1/ai/missions?leadId=${encodeURIComponent(leadId)}`)
-      .then(async (response) => {
-        if (!response.ok) return null;
+    let inFlight = false;
+    let loaded = false;
+    const load = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const response = await fetch(`/api/v1/ai/missions?leadId=${encodeURIComponent(leadId)}`);
+        if (!response.ok) throw new Error("mission_list_unavailable");
         const body = await response.json();
-        return Array.isArray(body.data) ? body.data as Mission[] : [];
-      })
-      .then((rows) => {
         if (!active) return;
-        setAvailable(rows !== null);
-        setMissions(rows ?? []);
-      })
-      .catch(() => {
-        if (active) setAvailable(false);
-      });
-    return () => { active = false; };
+        loaded = true;
+        setAvailable(true);
+        setMissions(Array.isArray(body.data) ? body.data as Mission[] : []);
+      } catch {
+        if (active && !loaded) setAvailable(false);
+      } finally {
+        inFlight = false;
+      }
+    };
+    void load();
+    // The model-consumption receipt is committed by the Worker after a model
+    // turn, not by the command POST. Refresh while this panel is visible.
+    const timer = setInterval(() => { void load(); }, 10_000);
+    return () => { active = false; clearInterval(timer); };
   }, [leadId, open]);
 
   if (!available) return null;
@@ -289,9 +300,16 @@ export function LeadMissionPanel({ leadId, pipelineId, open }: {
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error?.message ?? "无法补充任务方向");
-      setMissions((current) => current.map((mission) => mission.id === missionId
+      if (body.data.replayed) {
+        const current = await fetch(`/api/v1/ai/missions?leadId=${encodeURIComponent(leadId)}`);
+        if (current.ok) {
+          const fresh = await current.json();
+          if (Array.isArray(fresh.data)) setMissions(fresh.data as Mission[]);
+        }
+      } else setMissions((current) => current.map((mission) => mission.id === missionId
         ? { ...mission, status: body.data.missionStatus, blocked_reason: null,
           current_direction: direction,
+          direction_revision: body.data.directionRevision ?? mission.direction_revision,
           latest_run_id: body.data.runId, customer_send_paused: body.data.customerSendPaused } : mission));
       setManagerDirection("");
       directionRequest.current = null;
@@ -405,6 +423,14 @@ export function LeadMissionPanel({ leadId, pipelineId, open }: {
             </div>
             <p className="mt-1 text-xs text-text-muted">验收：{mission.acceptance_criteria}</p>
             {mission.current_direction && <p className="mt-1 text-xs text-text-muted">负责人方向：{mission.current_direction}</p>}
+            {mission.current_direction && typeof mission.direction_revision === "number" && (
+              <p className="mt-1 text-xs text-text-muted">
+                {typeof mission.direction_consumed_revision === "number" &&
+                  mission.direction_consumed_revision >= mission.direction_revision
+                  ? "新方向已由模型读取（不等于业务完成）"
+                  : "新方向已接受，等待模型消费"}
+              </p>
+            )}
             {mission.blocked_reason && <p className="mt-1 text-xs text-text-muted">当前原因：{mission.blocked_reason}</p>}
             {mission.resolution_reason && <p className="mt-1 text-xs text-text-muted">人工结论：{mission.resolution_reason}</p>}
             {mission.customer_send_paused && <p className="mt-1 text-xs text-destructive">客户发送已暂停；Agent 可继续读取和内部协作，但不能凭旧审批发出消息。</p>}

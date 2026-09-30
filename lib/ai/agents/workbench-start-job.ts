@@ -7,6 +7,7 @@ import { getRequestPool } from "@/lib/agent-engine/db/request-pool";
 import { buildMcpTurnTools } from "@/lib/agent-engine/edge/crm/mcp-tools";
 import type { RunModelCallInput, ToolSet } from "@/lib/agent-engine/edge/llm/run-model-call";
 import { appendWorkbenchEvent } from "@/lib/ai/agents/workbench-events";
+import { persistMissionRunMessagesAndDirectionAck } from "@/lib/ai/agents/mission-direction-consumption";
 import { appendWorkbenchObservation, parseRuntimeMessages } from "@/lib/ai/agents/workbench-state";
 import { executeReversibleLeadUpdate } from "@/lib/ai/agents/reversible-lead-update";
 import {
@@ -462,11 +463,20 @@ export async function runWorkbenchStartJob(
       },
     } satisfies RunModelCallInput;
     const firstModelResult = await executePiTurnModelCall(modelDeps, modelCallInput);
-    const { error: persistError } = await admin.from("ai_agent_run_states").upsert(
-      { organization_id: job.organization_id, run_id: runId, messages: firstModelResult.result.runtimeMessages as never },
-      { onConflict: "run_id" },
-    );
-    if (persistError) throw new Error("workbench_runtime_state_persist_failed");
+    if (run.mission_id) {
+      await persistMissionRunMessagesAndDirectionAck(pool, {
+        organizationId: job.organization_id, missionId: run.mission_id, runId,
+        expectedRevision: runtime.directionRevision,
+        messages: firstModelResult.result.runtimeMessages,
+        events: firstModelResult.events,
+      });
+    } else {
+      const { error: persistError } = await admin.from("ai_agent_run_states").upsert(
+        { organization_id: job.organization_id, run_id: runId, messages: firstModelResult.result.runtimeMessages as never },
+        { onConflict: "run_id" },
+      );
+      if (persistError) throw new Error("workbench_runtime_state_persist_failed");
+    }
     const recovery = await recoverWorkbenchResult({
       deps: modelDeps,
       first: firstModelResult,
@@ -481,11 +491,20 @@ export async function runWorkbenchStartJob(
     const modelResult = recovery.call;
     if (modelResult !== firstModelResult) {
       await beforeSideEffect();
-      const { error: recoveredStateError } = await admin.from("ai_agent_run_states").upsert(
-        { organization_id: job.organization_id, run_id: runId, messages: modelResult.result.runtimeMessages as never },
-        { onConflict: "run_id" },
-      );
-      if (recoveredStateError) throw new Error("workbench_runtime_state_persist_failed");
+      if (run.mission_id) {
+        await persistMissionRunMessagesAndDirectionAck(pool, {
+          organizationId: job.organization_id, missionId: run.mission_id, runId,
+          expectedRevision: runtime.directionRevision,
+          messages: modelResult.result.runtimeMessages,
+          events: modelResult.events,
+        });
+      } else {
+        const { error: recoveredStateError } = await admin.from("ai_agent_run_states").upsert(
+          { organization_id: job.organization_id, run_id: runId, messages: modelResult.result.runtimeMessages as never },
+          { onConflict: "run_id" },
+        );
+        if (recoveredStateError) throw new Error("workbench_runtime_state_persist_failed");
+      }
     }
     const submittedResult = resultChannel.submitted();
     const finalAnswer = submittedResult ? null : extractProductFinalAnswer(modelResult.result.text);

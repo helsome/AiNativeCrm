@@ -6,7 +6,7 @@ export function missionDirectionLockKey(organizationId: string, missionId: strin
 }
 
 export class MissionDirectionFenceError extends Error {
-  constructor(readonly code: "revision_missing" | "revision_changed" | "run_inactive") {
+  constructor(readonly code: "revision_missing" | "revision_changed" | "run_inactive" | "context_missing") {
     super(`mission_direction_${code}`);
     this.name = "MissionDirectionFenceError";
   }

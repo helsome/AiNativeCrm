@@ -109,6 +109,7 @@ describe("PiAgentRuntime", () => {
     expect(result.events[0]?.type).toBe("agent_start");
     expect(result.events[1]?.type).toBe("turn_start");
     expect(result.events.at(-2)?.type).toBe("turn_end");
+    expect(result.events.at(-2)?.data.stop_reason).toBe("stop");
     expect(result.events.at(-1)?.type).toBe("agent_end");
     expect(result.events.filter((event) => event.type === "message_update").length).toBeGreaterThan(
       0,

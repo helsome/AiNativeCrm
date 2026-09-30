@@ -20,7 +20,7 @@ export async function GET(request: NextRequest): Promise<Response> {
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("ai_missions")
-    .select("id, lead_id, goal, acceptance_criteria, current_direction, direction_revision, acceptance_contract, customer_send_paused, send_policy_revision, status, blocked_reason, resolution_reason, max_runs, max_total_tokens, max_total_cost_cents, wake_on_customer_reply, deadline_at, completed_at, created_at, updated_at")
+    .select("id, lead_id, goal, acceptance_criteria, current_direction, direction_revision, direction_consumed_revision, acceptance_contract, customer_send_paused, send_policy_revision, status, blocked_reason, resolution_reason, max_runs, max_total_tokens, max_total_cost_cents, wake_on_customer_reply, deadline_at, completed_at, created_at, updated_at")
     .eq("organization_id", authz.org.orgId)
     .eq("lead_id", parsed.data.leadId)
     .order("created_at", { ascending: false })

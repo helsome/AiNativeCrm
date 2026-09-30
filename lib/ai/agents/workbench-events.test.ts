@@ -33,4 +33,11 @@ describe("CRM workbench event payloads", () => {
       inputTokens: "secret-in-token-field", outputTokens: -1, costCents: null,
     })).toEqual({ inputTokens: "[REDACTED]", outputTokens: "[REDACTED]", costCents: null });
   });
+
+  it("records a direction consumption receipt without the instruction text", () => {
+    expect(redactEventPayload("manager_direction_consumed", {
+      directionId: "direction-1", directionRevision: 2,
+      content: "private manager instruction", apiKey: "secret",
+    })).toEqual({ directionId: "direction-1", directionRevision: 2 });
+  });
 });
