@@ -142,7 +142,7 @@ function auditMissionCrmChanges(input: MissionEvalInput): {
   return { observed, conflicts, unverified };
 }
 
-function verifyCustomerDelivery(
+export function verifyCustomerDelivery(
   draft: MissionReplyDeliveryEvidence | undefined,
   leadContactId: string | null,
 ): { verdict: "verified" | "unverified" | "conflict"; reason: string } {

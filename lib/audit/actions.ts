@@ -205,6 +205,7 @@ export const AUDIT_ACTIONS = [
   "ai_mission.wait_for_internal",
   "ai_mission.internal_response",
   "ai_mission.cancel",
+  "ai_mission.customer_acceptance_reviewed",
   "ai_agent.reconciled",
   "ai_reply.generated",
   "ai_reply.approved",

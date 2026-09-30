@@ -142,6 +142,27 @@ describe("LeadMissionPanel internal information", () => {
     expect(screen.getByText(/不等于自由文本业务验收/)).toBeInTheDocument();
   });
 
+  it("shows cited customer text as a cost-bearing independent review, not verified completion", async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(response([{ id: MISSION, goal: "推进报价",
+        acceptance_criteria: "客户接受报价和交期", status: "needs_review",
+        blocked_reason: null, resolution_reason: null, latest_run_id: "run-1" }]))
+      .mockResolvedValueOnce(response({ verdict: "supported", businessOutcomeVerified: false,
+        rationale: "客户明确提及两项", evidence: [{ messageId: KEY,
+          quote: "接受报价和交期", stance: "accepts" }], missingTerms: [] }));
+    vi.stubGlobal("fetch", fetch);
+    render(<LeadMissionPanel leadId="lead-a" pipelineId="pipeline-a" open />);
+    fireEvent.click(await screen.findByRole("button", {
+      name: "用真实模型审查客户答复（会产生费用）",
+    }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    expect(fetch.mock.calls[1]?.[0]).toBe(`/api/v1/ai/missions/${MISSION}/customer-acceptance`);
+    expect((fetch.mock.calls[1]?.[1] as RequestInit).method).toBe("POST");
+    expect(await screen.findByText(/有支持性原文/)).toBeInTheDocument();
+    expect(screen.getByText(/模型判断不是客户身份或合同成立的证明/)).toBeInTheDocument();
+    expect(screen.getByText(/客户消息 33333333：「接受报价和交期」/)).toBeInTheDocument();
+  });
+
   it("offers a CRM response for a waiting Mission and sends one idempotent request", async () => {
     const fetch = vi.fn()
       .mockResolvedValueOnce(response([{ id: MISSION, goal: "确认交期", acceptance_criteria: "客户接受交期",

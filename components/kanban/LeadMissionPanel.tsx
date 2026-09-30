@@ -64,6 +64,15 @@ type MissionEvaluation = {
   }>;
 };
 
+type CustomerAcceptanceAssessment = {
+  verdict: "supported" | "contradicted" | "ambiguous" | "insufficient";
+  rationale?: string;
+  reason?: string;
+  businessOutcomeVerified: false;
+  evidence: Array<{ messageId: string; quote: string; stance: "accepts" | "rejects" | "qualifies" }>;
+  missingTerms?: string[];
+};
+
 type FeishuRecipient = { user_id: string; full_name: string | null };
 type SendPolicyCommand = {
   id: number;
@@ -126,6 +135,8 @@ export function LeadMissionPanel({ leadId, pipelineId, open }: {
   const [error, setError] = useState("");
   const [evaluations, setEvaluations] = useState<Record<string, MissionEvaluation>>({});
   const [evaluatingId, setEvaluatingId] = useState<string | null>(null);
+  const [acceptanceAssessments, setAcceptanceAssessments] = useState<Record<string, CustomerAcceptanceAssessment>>({});
+  const [assessingId, setAssessingId] = useState<string | null>(null);
   const [commandHistory, setCommandHistory] = useState<Record<string, SendPolicyCommand[]>>({});
 
   useEffect(() => {
@@ -399,6 +410,25 @@ export function LeadMissionPanel({ leadId, pipelineId, open }: {
     }
   };
 
+  const assessCustomerAcceptance = async (missionId: string) => {
+    setAssessingId(missionId);
+    setError("");
+    try {
+      const response = await fetch(`/api/v1/ai/missions/${missionId}/customer-acceptance`, {
+        method: "POST",
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error?.message ?? "客户答复审查失败");
+      setAcceptanceAssessments((current) => ({
+        ...current, [missionId]: body.data as CustomerAcceptanceAssessment,
+      }));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "客户答复审查失败");
+    } finally {
+      setAssessingId(null);
+    }
+  };
+
   return (
     <section className="border-b border-border py-3" data-testid="lead-missions">
       <div className="flex items-center justify-between gap-3">
@@ -414,6 +444,7 @@ export function LeadMissionPanel({ leadId, pipelineId, open }: {
       <div className="mt-2 space-y-3">
         {missions.map((mission) => {
           const evaluation = evaluations[mission.id];
+          const acceptanceAssessment = acceptanceAssessments[mission.id];
           const history = commandHistory[mission.id];
           return (
           <article key={mission.id} className="rounded-md border border-border p-3 text-sm">
@@ -467,6 +498,27 @@ export function LeadMissionPanel({ leadId, pipelineId, open }: {
             >
               {evaluatingId === mission.id ? "评测中…" : "查看业务评测"}
             </button>
+            <button disabled={assessingId === mission.id}
+              onClick={() => void assessCustomerAcceptance(mission.id)}
+              className="ml-3 mt-2 text-xs underline underline-offset-2 disabled:opacity-50">
+              {assessingId === mission.id ? "审查中…" : "用真实模型审查客户答复（会产生费用）"}
+            </button>
+            {acceptanceAssessment && (
+              <div className="mt-2 rounded-md border border-border p-2 text-xs text-text-muted">
+                <p>独立客户答复审查：{{ supported: "有支持性原文", contradicted: "有明确反对原文",
+                  ambiguous: "答复含糊或附条件", insufficient: "证据不足" }[acceptanceAssessment.verdict]}。
+                  模型判断不是客户身份或合同成立的证明，业务结果仍须负责人核对。</p>
+                {acceptanceAssessment.rationale && <p className="mt-1">判断依据：{acceptanceAssessment.rationale}</p>}
+                {acceptanceAssessment.reason && <p className="mt-1">原因：{acceptanceAssessment.reason}</p>}
+                {acceptanceAssessment.evidence.map((item) => (
+                  <p key={item.messageId} className="mt-1 break-words">
+                    客户消息 {item.messageId.slice(0, 8)}：「{item.quote}」
+                  </p>
+                ))}
+                {Boolean(acceptanceAssessment.missingTerms?.length) &&
+                  <p>未获明确确认：{acceptanceAssessment.missingTerms?.join("；")}</p>}
+              </div>
+            )}
             {evaluation && (
               <div className="mt-2 rounded-md border border-border p-2 text-xs text-text-muted">
                 <p>{VERDICT_LABEL[evaluation.verdict]}；业务结果未由系统独立核验。</p>
