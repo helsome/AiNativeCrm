@@ -4,17 +4,20 @@ import { z } from "zod";
 import { ok, fail } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
-import { appendWorkbenchEvent } from "@/lib/ai/agents/workbench-events";
-import { appendWorkbenchObservation, parseRuntimeMessages } from "@/lib/ai/agents/workbench-state";
 import { resolveWorkbenchScope } from "@/lib/ai/agents/workbench-scope";
-import { executeApprovedWorkbenchTool } from "@/lib/ai/agents/approved-workbench-tool";
+import {
+  executeApprovedWorkbenchTool, NonCompensableWorkbenchWriteError,
+} from "@/lib/ai/agents/approved-workbench-tool";
+import {
+  assertWorkbenchApprovedActionCurrent, claimWorkbenchApprovedAction,
+  finishWorkbenchApprovedAction, markWorkbenchApprovedActionUncertain,
+} from "@/lib/ai/agents/workbench-approved-action";
 import { workbenchToolEffect } from "@/lib/ai/agents/tool-effects";
 import { validateWorkbenchToolArgs } from "@/lib/ai/agents/validate-workbench-tool-args";
 import { requestTurnDeps } from "@/lib/agent-engine/agent/request-deps";
 import { loadAgentVersionConfig } from "@/lib/agent-engine/agent/agent-config";
 import { buildMcpTurnTools } from "@/lib/agent-engine/edge/crm/mcp-tools";
 import { getRequestPool } from "@/lib/agent-engine/db/request-pool";
-import { enqueueJob } from "@/lib/agent-engine/queue/queue";
 import { VALID_TOOL_IDS } from "@/lib/mcp/tools/catalog";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -181,22 +184,6 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<Response> {
     }
   }
 
-  if (proposal.tool_name !== "send_message") {
-    // Non-send approvals still execute their tool after this claim. Rejections
-    // above have their own atomic transaction, while the reply draft trigger
-    // below claims the send decision in the same transaction as its outbox.
-    const { data: claimed } = await admin
-      .from("ai_workbench_runs")
-      .update({ status: "running" })
-      .eq("organization_id", authz.org.orgId)
-      .eq("id", id)
-      .eq("status", "awaiting_confirmation")
-      .select("id")
-      .maybeSingle();
-    if (!claimed)
-      return fail("state_conflict", "另一个决策正在处理，请刷新运行详情。", 409, { requestId });
-  }
-
   if (parsed.data.decision === "approve" && run.mission_id) {
     const { data: mission, error: missionError } = await admin.from("ai_missions")
       .select("status")
@@ -204,24 +191,19 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<Response> {
       .eq("id", run.mission_id)
       .maybeSingle();
     if (missionError || !mission || ["cancelled", "completed"].includes(mission.status)) {
-      if (proposal.tool_name !== "send_message")
-        await restoreAwaitingConfirmation(admin, authz.org.orgId, id);
       return fail("mission_not_active", "业务任务已停止，不能再批准关联动作。", 409, { requestId });
     }
   }
 
-  const decidedAt = new Date().toISOString();
   const decision = parsed.data.decision;
   if (
     decision === "approve" &&
     proposal.tool_name !== "send_message" &&
     !VALID_TOOL_IDS.includes(proposal.tool_name as never)
   ) {
-    await restoreAwaitingConfirmation(admin, authz.org.orgId, id);
     return fail("tool_not_allowed", "提议工具不在当前 CRM 工具目录中。", 409, { requestId });
   }
 
-  let observation: { tool: string; status: "executed" | "rejected" | "failed"; result?: unknown };
   if (proposal.tool_name === "send_message") {
     const { data: draft } = await admin
       .from("ai_reply_drafts")
@@ -299,248 +281,136 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<Response> {
       run_status: receipt.outcome === "queued" ? "running"
         : receipt.outcome === "awaiting_confirmation" ? "awaiting_confirmation" : "partial",
     }, { requestId });
-  } else {
-    const state = run.runtime_state as { versionId?: unknown };
-    if (typeof state?.versionId !== "string") {
-      await restoreAwaitingConfirmation(admin, authz.org.orgId, id);
-      return fail("run_state_missing", "无法恢复这次运行的 Agent 版本。", 409, { requestId });
+  }
+  const state = run.runtime_state as { versionId?: unknown };
+  if (typeof state?.versionId !== "string")
+    return fail("run_state_missing", "无法恢复这次运行的 Agent 版本。", 409, { requestId });
+  const agentBase = await loadAgentVersionConfig(
+    getRequestPool(), authz.org.orgId, run.agent_id, state.versionId,
+  );
+  const scopeInput = scopeInputFromRun(run.scope);
+  const agent = agentBase
+    ? { ...agentBase, pipelineIds: scopeInput.pipelineId ? [scopeInput.pipelineId] : [] }
+    : null;
+  if (!agent || !agent.toolIds.includes(proposal.tool_name))
+    return fail("tool_not_allowed", "这个 Agent 当前版本未授权该 CRM 工具。", 409,
+      { requestId });
+  try {
+    await resolveWorkbenchScope(admin, authz.org.orgId, scopeInput);
+  } catch {
+    return fail("scope_not_found", "CRM 对象范围已变化；操作保持未执行。", 409,
+      { requestId });
+  }
+  const deps = requestTurnDeps();
+  const mcp = await buildMcpTurnTools(
+    deps.crmCfg,
+    { organizationId: authz.org.orgId, jobId: id },
+    agent,
+    deps.log,
+    proposal.tool_name === "crm_request_human_handoff"
+      ? { confirmationTools: ["crm_request_human_handoff"] }
+      : undefined,
+  );
+  try {
+    const tool = mcp?.tools[proposal.tool_name];
+    if (!tool || typeof tool.execute !== "function")
+      return fail("tool_not_allowed", "该动作无法通过当前 CRM Harness 安全执行。", 409,
+        { requestId });
+
+    let claimed: boolean;
+    try {
+      claimed = await claimWorkbenchApprovedAction(getRequestPool(), {
+        organizationId: authz.org.orgId, runId: id, proposalId,
+        toolName: proposal.tool_name, actorUserId: authz.user.id,
+        reason: parsed.data.reason,
+      });
+    } catch {
+      return fail("decision_state_unknown", "批准决定状态暂未确认，请刷新运行详情。", 503,
+        { requestId });
     }
-    const agentBase = await loadAgentVersionConfig(
-      getRequestPool(),
-      authz.org.orgId,
-      run.agent_id,
-      state.versionId,
-    );
-    const scopeInput = run.scope as {
-      contactId?: string;
-      leadId?: string;
-      conversationId?: string;
-      pipelineId?: string;
-    };
-    const pipelineIds = scopeInput.pipelineId ? [scopeInput.pipelineId] : [];
-    const agent = agentBase ? { ...agentBase, pipelineIds } : null;
-    if (!agent || !agent.toolIds.includes(proposal.tool_name)) {
-      await restoreAwaitingConfirmation(admin, authz.org.orgId, id);
-      return fail("tool_not_allowed", "这个 Agent 当前版本未授权该 CRM 工具。", 409, { requestId });
+    if (!claimed)
+      return fail("state_conflict", "任务或提案状态已变化；没有执行 CRM 工具。", 409,
+        { requestId });
+    void audit({
+      action: "ai_workbench.action_approved",
+      actorUserId: authz.user.id,
+      organizationId: authz.org.orgId,
+      resourceType: "ai_agent_action_proposal",
+      resourceId: proposalId,
+      requestId,
+      metadata: { run_id: id, tool: proposal.tool_name },
+    });
+
+    try {
+      await assertWorkbenchApprovedActionCurrent(getRequestPool(), {
+        organizationId: authz.org.orgId, runId: id, proposalId,
+      });
+    } catch {
+      try {
+        await finishWorkbenchApprovedAction(getRequestPool(), {
+          organizationId: authz.org.orgId, runId: id, proposalId,
+          toolName: proposal.tool_name,
+          result: { kind: "safe_failure", code: "approval_no_longer_current" },
+        });
+      } catch {
+        // The worker will reconcile the durable approved intent if needed.
+      }
+      return fail("approval_no_longer_current",
+        "任务状态已变化，未进入 CRM 工具；请刷新运行详情。", 409, { requestId });
     }
 
-    const deps = requestTurnDeps();
-    const mcp = await buildMcpTurnTools(
-      deps.crmCfg,
-      { organizationId: authz.org.orgId, jobId: id },
-      agent,
-      deps.log,
-      proposal.tool_name === "crm_request_human_handoff"
-        ? { confirmationTools: ["crm_request_human_handoff"] }
-        : undefined,
-    );
-    const tool = mcp?.tools[proposal.tool_name];
-    if (!tool || typeof tool.execute !== "function") {
-      await mcp?.cleanup();
-      await restoreAwaitingConfirmation(admin, authz.org.orgId, id);
-      return fail("tool_not_allowed", "该动作无法通过当前 CRM Harness 安全执行。", 409, {
-        requestId,
-      });
-    }
-    await appendWorkbenchEvent(admin, {
-      organizationId: authz.org.orgId,
-      runId: id,
-      type: "human_confirmation_received",
-      payload: { proposalId, decision, actorUserId: authz.user.id },
-    });
-    await appendWorkbenchEvent(admin, {
-      organizationId: authz.org.orgId,
-      runId: id,
-      type: "policy_checked",
-      payload: { proposalId, decision: "approved", tool: proposal.tool_name },
-    });
-    await appendWorkbenchEvent(admin, {
-      organizationId: authz.org.orgId,
-      runId: id,
-      type: "tool_started",
-      payload: { proposalId, tool: proposal.tool_name },
-    });
     try {
       const { output, reversible } = await executeApprovedWorkbenchTool({
         toolName: proposal.tool_name,
-        args: validatedArgs?.ok ? validatedArgs.args : proposal.tool_args,
+        args: validatedArgs.ok ? validatedArgs.args : proposal.tool_args,
         tools: mcp.tools as never,
       });
-      observation = { tool: proposal.tool_name, status: "executed", result: output };
-      const { error } = await admin
-        .from("ai_agent_action_proposals")
-        .update({
-          status: "executed",
-          ...(reversible
-            ? {
-                compensation_args: reversible.compensationArgs as never,
-                preview: reversible.preview as never,
-              }
-            : {}),
-          decision_by: authz.user.id,
-          decision_reason: parsed.data.reason ?? null,
-          decision_at: decidedAt,
-          result_summary: { outcome: "executed", tool: proposal.tool_name },
-        })
-        .eq("organization_id", authz.org.orgId)
-        .eq("id", proposalId)
-        .eq("status", "pending");
-      if (error) throw new Error("proposal_update_failed");
-      await appendWorkbenchEvent(admin, {
-        organizationId: authz.org.orgId,
-        runId: id,
-        type: "tool_completed",
-        payload: { proposalId, tool: proposal.tool_name, status: "success" },
+      const outcome = await finishWorkbenchApprovedAction(getRequestPool(), {
+        organizationId: authz.org.orgId, runId: id, proposalId,
+        toolName: proposal.tool_name,
+        result: { kind: "success", output,
+          ...(reversible ? {
+            compensationArgs: reversible.compensationArgs,
+            preview: reversible.preview,
+          } : {}) },
       });
-      await appendWorkbenchEvent(admin, {
-        organizationId: authz.org.orgId,
-        runId: id,
-        type: "crm_state_changed",
-        payload: {
-          proposalId,
-          tool: proposal.tool_name,
-          ...(reversible
-            ? {
-                resource: "crm_leads",
-                targetId: reversible.preview.resourceUuid,
-                changedFields: reversible.preview.changedFields,
-              }
-            : {}),
-        },
-      });
-      void audit({
-        action: "ai_workbench.action_approved",
-        actorUserId: authz.user.id,
-        organizationId: authz.org.orgId,
-        resourceType: "ai_agent_action_proposal",
-        resourceId: proposalId,
-        requestId,
-        metadata: { run_id: id, tool: proposal.tool_name },
-      });
-    } catch {
-      observation = {
-        tool: proposal.tool_name,
-        status: "failed",
-        result: { error: "operation_failed" },
-      };
-      await admin
-        .from("ai_agent_action_proposals")
-        .update({
-          status: "failed",
-          decision_by: authz.user.id,
-          decision_reason: parsed.data.reason ?? null,
-          decision_at: decidedAt,
-          result_summary: { outcome: "failed" },
-        })
-        .eq("organization_id", authz.org.orgId)
-        .eq("id", proposalId)
-        .eq("status", "pending");
-      await appendWorkbenchEvent(admin, {
-        organizationId: authz.org.orgId,
-        runId: id,
-        type: "tool_completed",
-        payload: { proposalId, tool: proposal.tool_name, status: "error" },
-      });
-    } finally {
-      await mcp?.cleanup();
+      if (!outcome)
+        return fail("action_result_state_conflict",
+          "工具结果已产生，但运行状态已变化；请核对 CRM。", 409, { requestId });
+      return ok({ proposal_id: proposalId, status: "executed",
+        run_status: outcome === "queued" ? "running" : outcome },
+      { requestId });
+    } catch (error) {
+      if (error instanceof NonCompensableWorkbenchWriteError) {
+        try {
+          const outcome = await finishWorkbenchApprovedAction(getRequestPool(), {
+            organizationId: authz.org.orgId, runId: id, proposalId,
+            toolName: proposal.tool_name,
+            result: { kind: "safe_failure", code: "non_compensable_reversible_write" },
+          });
+          if (outcome)
+            return ok({ proposal_id: proposalId, status: "failed",
+              run_status: outcome === "queued" ? "running" : outcome },
+            { requestId });
+        } catch {
+          // The worker will reconcile the durable approved intent if needed.
+        }
+      } else {
+        try {
+          await markWorkbenchApprovedActionUncertain(getRequestPool(), {
+            organizationId: authz.org.orgId, runId: id, proposalId,
+          });
+        } catch {
+          // The worker will reconcile the durable approved intent if needed.
+        }
+      }
+      return fail("action_outcome_uncertain",
+        "CRM 动作结果尚不能确认，已停止自动续跑；请核对业务状态，系统不会自动重放。", 503,
+        { requestId });
     }
+  } finally {
+    await mcp?.cleanup();
   }
-
-  const { data: runState } = await admin
-    .from("ai_agent_run_states")
-    .select("messages")
-    .eq("organization_id", authz.org.orgId)
-    .eq("run_id", id)
-    .maybeSingle();
-  const messages = parseRuntimeMessages(runState?.messages);
-  if (!messages) {
-    await failRun(admin, authz.org.orgId, id, "resume_state_missing");
-    return fail(
-      "run_state_missing",
-      "无法安全恢复 Pi 的持久化消息状态。该动作已记录，请从 CRM 核对结果。",
-      409,
-      { requestId },
-    );
-  }
-  const continuedMessages = appendWorkbenchObservation(messages, observation);
-  const { error: stateError } = await admin
-    .from("ai_agent_run_states")
-    .update({ messages: continuedMessages as never })
-    .eq("organization_id", authz.org.orgId)
-    .eq("run_id", id);
-  if (stateError) {
-    await failRun(admin, authz.org.orgId, id, "resume_state_write_failed");
-    return fail(
-      "run_state_write_failed",
-      "动作已处理，但无法保存 Pi 恢复状态；请检查 CRM 当前结果。",
-      500,
-      { requestId },
-    );
-  }
-
-  const { count: pendingCount } = await admin
-    .from("ai_agent_action_proposals")
-    .select("id", { count: "exact", head: true })
-    .eq("organization_id", authz.org.orgId)
-    .eq("run_id", id)
-    .eq("status", "pending");
-  if ((pendingCount ?? 0) > 0) {
-    await restoreAwaitingConfirmation(admin, authz.org.orgId, id);
-    return ok(
-      { proposal_id: proposalId, status: observation.status, run_status: "awaiting_confirmation" },
-      { requestId },
-    );
-  }
-
-  try {
-    await appendWorkbenchEvent(admin, {
-      organizationId: authz.org.orgId,
-      runId: id,
-      type: "run_resumed",
-      payload: { proposalId },
-    });
-  } catch {
-    await failRun(admin, authz.org.orgId, id, "resume_event_persist_failed");
-    return fail(
-      "resume_event_persist_failed",
-      "动作已记录，但无法追加运行事件；请核对 CRM 状态。",
-      500,
-      { requestId },
-    );
-  }
-  try {
-    await resolveWorkbenchScope(admin, authz.org.orgId, scopeInputFromRun(run.scope));
-  } catch {
-    await failRun(admin, authz.org.orgId, id, "scope_no_longer_available");
-    return fail("scope_not_found", "CRM 对象范围已变化，操作已记录，但无法继续 Agent。", 409, {
-      requestId,
-    });
-  }
-  const runtimeState = run.runtime_state as { versionId?: unknown };
-  if (typeof runtimeState?.versionId !== "string") {
-    await failRun(admin, authz.org.orgId, id, "resume_version_missing");
-    return fail("run_state_missing", "无法读取原 Agent 版本。", 409, { requestId });
-  }
-  try {
-    await enqueueJob(getRequestPool(), authz.org.orgId, {
-      kind: "workbench_resume",
-      sourceEventId: proposalId,
-      payload: { runId: id },
-      maxAttempts: 3,
-    });
-  } catch {
-    await failRun(admin, authz.org.orgId, id, "resume_queue_unavailable");
-    return fail(
-      "resume_queue_unavailable",
-      "动作已记录，但运行队列暂不可用；请核对 CRM 状态后重试。",
-      503,
-      { requestId },
-    );
-  }
-  return ok(
-    { proposal_id: proposalId, status: observation.status, run_status: "running" },
-    { requestId },
-  );
 }
 
 function scopeInputFromRun(value: unknown) {
@@ -551,37 +421,4 @@ function scopeInputFromRun(value: unknown) {
     ...(typeof scope.conversationId === "string" ? { conversationId: scope.conversationId } : {}),
     ...(typeof scope.pipelineId === "string" ? { pipelineId: scope.pipelineId } : {}),
   };
-}
-
-async function restoreAwaitingConfirmation(
-  admin: ReturnType<typeof createAdminClient>,
-  organizationId: string,
-  runId: string,
-) {
-  await admin
-    .from("ai_workbench_runs")
-    .update({ status: "awaiting_confirmation" })
-    .eq("organization_id", organizationId)
-    .eq("id", runId)
-    .eq("status", "running");
-}
-
-async function failRun(
-  admin: ReturnType<typeof createAdminClient>,
-  organizationId: string,
-  runId: string,
-  code: string,
-) {
-  await admin
-    .from("ai_workbench_runs")
-    .update({ status: "partial", error_code: code, completed_at: new Date().toISOString() })
-    .eq("organization_id", organizationId)
-    .eq("id", runId)
-    .eq("status", "running");
-  await appendWorkbenchEvent(admin, {
-    organizationId,
-    runId,
-    type: "run_partial",
-    payload: { status: "partial", pendingProposals: 0 },
-  });
 }

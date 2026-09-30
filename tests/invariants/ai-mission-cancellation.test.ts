@@ -7,6 +7,11 @@ import {
 } from "@/lib/ai/agents/workbench-send-decision-recovery";
 import { rejectWorkbenchProposal } from "@/lib/ai/agents/workbench-reject-decision";
 import { ASK_INTERNAL_COLLEAGUE_TOOL } from "@/lib/ai/agents/internal-question-contract";
+import {
+  assertWorkbenchApprovedActionCurrent, claimWorkbenchApprovedAction,
+  finishWorkbenchApprovedAction,
+  markWorkbenchApprovedActionUncertain, reconcileStaleWorkbenchApprovedActions,
+} from "@/lib/ai/agents/workbench-approved-action";
 import { criarOrigemDeFollowup } from "./followup-service-origin";
 
 const pool = new pg.Pool({
@@ -162,6 +167,214 @@ async function sendCommand(missionId: string, key: string, kind: string,
 }
 
 describe("Mission cancellation fences customer delivery", () => {
+  it("commits a known approved-tool result with its Pi observation and resume job", async () => {
+    const f = await stagedNonSendMission();
+    const input = { organizationId: org, runId: f.runId, proposalId: f.proposalId,
+      toolName: "crm_request_human_handoff", actorUserId: actor };
+    try {
+      expect(await claimWorkbenchApprovedAction(pool, input)).toBe(true);
+      expect(await claimWorkbenchApprovedAction(pool, input)).toBe(false);
+      expect(await finishWorkbenchApprovedAction(pool, {
+        ...input, result: { kind: "success", output: { handoff_recorded: true } },
+      })).toBe("queued");
+      const { rows } = await pool.query<{
+        proposal_status: string; run_status: string; resume_count: number;
+        observation: string; event_count: number;
+      }>(
+        `select p.status as proposal_status,r.status as run_status,
+                (select count(*)::int from public.job_queue j
+                 where j.organization_id=$1 and j.kind='workbench_resume'
+                   and j.source_event_id=$2) as resume_count,
+                (select messages->-1->>'content' from public.ai_agent_run_states s
+                 where s.organization_id=$1 and s.run_id=$3) as observation,
+                (select count(*)::int from public.ai_agent_run_events e
+                 where e.organization_id=$1 and e.run_id=$3) as event_count
+         from public.ai_agent_action_proposals p
+         join public.ai_workbench_runs r on r.id=p.run_id
+         where p.organization_id=$1 and p.id=$2`,
+        [org, f.proposalId, f.runId],
+      );
+      expect(rows[0]).toMatchObject({ proposal_status: "executed", run_status: "running",
+        resume_count: 1, event_count: 6 });
+      expect(rows[0]?.observation).toContain('"handoff_recorded":true');
+      expect(await finishWorkbenchApprovedAction(pool, {
+        ...input, result: { kind: "success", output: { handoff_recorded: true } },
+      })).toBeNull();
+    } finally {
+      await cancel(f.missionId);
+    }
+  });
+
+  it("does not guess a tool result when HTTP dies after approval claim", async () => {
+    const f = await stagedNonSendMission();
+    const input = { organizationId: org, runId: f.runId, proposalId: f.proposalId,
+      toolName: "crm_request_human_handoff", actorUserId: actor };
+    try {
+      expect(await claimWorkbenchApprovedAction(pool, input)).toBe(true);
+      await pool.query(
+        `update public.ai_agent_action_proposals
+         set decision_at=now()-interval '7 minutes'
+         where organization_id=$1 and id=$2`,
+        [org, f.proposalId],
+      );
+      expect(await reconcileStaleWorkbenchApprovedActions(pool)).toBeGreaterThanOrEqual(1);
+      const { rows } = await pool.query<{
+        proposal_status: string; result_summary: { outcome: string; code: string };
+        run_status: string; error_code: string; resume_count: number;
+        event_status: string;
+      }>(
+        `select p.status as proposal_status,p.result_summary,r.status as run_status,r.error_code,
+                (select count(*)::int from public.job_queue j
+                 where j.organization_id=$1 and j.kind='workbench_resume'
+                   and j.source_event_id=$2) as resume_count,
+                (select payload->>'status' from public.ai_agent_run_events e
+                 where e.organization_id=$1 and e.run_id=$3
+                   and e.event_type='tool_completed' order by e.sequence desc limit 1)
+                   as event_status
+         from public.ai_agent_action_proposals p
+         join public.ai_workbench_runs r on r.id=p.run_id
+         where p.organization_id=$1 and p.id=$2`,
+        [org, f.proposalId, f.runId],
+      );
+      expect(rows[0]).toMatchObject({ proposal_status: "failed",
+        result_summary: { outcome: "reconciliation_required", code: "effect_may_have_completed" },
+        run_status: "partial", error_code: "approved_action_outcome_unknown",
+        resume_count: 0, event_status: "unknown" });
+      expect(await reconcileStaleWorkbenchApprovedActions(pool)).toBe(0);
+      expect(await markWorkbenchApprovedActionUncertain(pool, {
+        organizationId: randomUUID(), runId: f.runId, proposalId: f.proposalId,
+      })).toBe(false);
+    } finally {
+      await cancel(f.missionId);
+    }
+  });
+
+  it("rolls back the known result when enqueueing Pi continuation fails", async () => {
+    const f = await stagedNonSendMission();
+    const input = { organizationId: org, runId: f.runId, proposalId: f.proposalId,
+      toolName: "crm_request_human_handoff", actorUserId: actor };
+    try {
+      expect(await claimWorkbenchApprovedAction(pool, input)).toBe(true);
+      await pool.query(
+        `insert into public.job_queue
+         (organization_id,kind,source_event_id,payload,max_attempts)
+         values ($1,'workbench_resume',$2,jsonb_build_object('runId',$3::uuid),3)`,
+        [org, f.proposalId, randomUUID()],
+      );
+      await expect(finishWorkbenchApprovedAction(pool, {
+        ...input, result: { kind: "success", output: { handoff_recorded: true } },
+      })).rejects.toThrow();
+      const { rows } = await pool.query<{
+        proposal_status: string; run_status: string; event_count: number;
+        messages_count: number;
+      }>(
+        `select p.status as proposal_status,r.status as run_status,
+                (select count(*)::int from public.ai_agent_run_events e
+                 where e.organization_id=$1 and e.run_id=$2) as event_count,
+                (select jsonb_array_length(messages) from public.ai_agent_run_states s
+                 where s.organization_id=$1 and s.run_id=$2) as messages_count
+         from public.ai_agent_action_proposals p
+         join public.ai_workbench_runs r on r.id=p.run_id
+         where p.organization_id=$1 and p.id=$3`,
+        [org, f.runId, f.proposalId],
+      );
+      expect(rows[0]).toEqual({ proposal_status: "approved", run_status: "running",
+        event_count: 3, messages_count: 2 });
+      expect(await markWorkbenchApprovedActionUncertain(pool, input)).toBe(true);
+    } finally {
+      await cancel(f.missionId);
+    }
+  });
+
+  it("continues Pi after a proven pre-effect failure without claiming CRM success", async () => {
+    const f = await stagedNonSendMission();
+    const input = { organizationId: org, runId: f.runId, proposalId: f.proposalId,
+      toolName: "crm_request_human_handoff", actorUserId: actor };
+    try {
+      expect(await claimWorkbenchApprovedAction(pool, input)).toBe(true);
+      expect(await finishWorkbenchApprovedAction(pool, {
+        ...input, result: { kind: "safe_failure", code: "approval_no_longer_current" },
+      })).toBe("queued");
+      const { rows } = await pool.query<{ status: string; observation: string;
+        resume_count: number }>(
+        `select p.status,
+                (select messages->-1->>'content' from public.ai_agent_run_states s
+                 where s.organization_id=$1 and s.run_id=$2) as observation,
+                (select count(*)::int from public.job_queue j
+                 where j.organization_id=$1 and j.source_event_id=$3
+                   and j.kind='workbench_resume') as resume_count
+         from public.ai_agent_action_proposals p
+         where p.organization_id=$1 and p.id=$3`,
+        [org, f.runId, f.proposalId],
+      );
+      expect(rows[0]?.status).toBe("failed");
+      expect(rows[0]?.observation).toContain("approval_no_longer_current");
+      expect(rows[0]?.resume_count).toBe(1);
+    } finally {
+      await cancel(f.missionId);
+    }
+  });
+
+  it("closes other pending actions and drafts when an approved effect is unknown", async () => {
+    const f = await stagedMission();
+    const approvedProposalId = randomUUID();
+    await pool.query(
+      `insert into public.ai_agent_action_proposals
+       (id,organization_id,run_id,sequence,tool_name,tool_args)
+       values ($1,$2,$3,2,'crm_request_human_handoff','{}'::jsonb)`,
+      [approvedProposalId, org, f.runId],
+    );
+    try {
+      expect(await claimWorkbenchApprovedAction(pool, {
+        organizationId: org, runId: f.runId, proposalId: approvedProposalId,
+        toolName: "crm_request_human_handoff", actorUserId: actor,
+      })).toBe(true);
+      expect(await markWorkbenchApprovedActionUncertain(pool, {
+        organizationId: org, runId: f.runId, proposalId: approvedProposalId,
+      })).toBe(true);
+      const { rows } = await pool.query<{ pending_status: string; draft_status: string;
+        run_status: string }>(
+        `select p.status as pending_status,d.status as draft_status,r.status as run_status
+         from public.ai_agent_action_proposals p
+         join public.ai_reply_drafts d
+           on d.organization_id=p.organization_id and d.workbench_proposal_id=p.id
+         join public.ai_workbench_runs r on r.id=p.run_id
+         where p.organization_id=$1 and p.id=$2`,
+        [org, f.proposalId],
+      );
+      expect(rows[0]).toEqual({ pending_status: "cancelled", draft_status: "stale",
+        run_status: "partial" });
+    } finally {
+      await cancel(f.missionId);
+    }
+  });
+
+  it("records a known in-flight effect without reviving a cancelled Mission", async () => {
+    const f = await stagedNonSendMission();
+    const input = { organizationId: org, runId: f.runId, proposalId: f.proposalId,
+      toolName: "crm_request_human_handoff", actorUserId: actor };
+    expect(await claimWorkbenchApprovedAction(pool, input)).toBe(true);
+    expect(await cancel(f.missionId)).toBe("cancelled");
+    await expect(assertWorkbenchApprovedActionCurrent(pool, input))
+      .rejects.toThrow("workbench_approved_action_no_longer_current");
+    expect(await finishWorkbenchApprovedAction(pool, {
+      ...input, result: { kind: "success", output: { handoff_recorded: true } },
+    })).toBe("cancelled");
+    const { rows } = await pool.query<{ proposal_status: string; run_status: string;
+      resume_count: number }>(
+      `select p.status as proposal_status,r.status as run_status,
+              (select count(*)::int from public.job_queue j
+               where j.organization_id=$1 and j.kind='workbench_resume'
+                 and j.source_event_id=$2) as resume_count
+       from public.ai_agent_action_proposals p
+       join public.ai_workbench_runs r on r.id=p.run_id
+       where p.organization_id=$1 and p.id=$2`,
+      [org, f.proposalId],
+    );
+    expect(rows[0]).toEqual({ proposal_status: "executed", run_status: "cancelled",
+      resume_count: 0 });
+  });
+
   it("does not commit a customer send when the Run is no longer awaiting confirmation", async () => {
     const f = await stagedMission();
     await pool.query(

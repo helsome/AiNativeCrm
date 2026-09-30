@@ -848,8 +848,17 @@ export function AgentCrmWorkbench({
                       proposal.tool_name === "ask_internal_colleague") &&
                       proposal.status === "executed"
                       ? "已进入 CRM 发送队列"
-                      : proposal.status}
+                      : proposal.status === "approved"
+                        ? "批准已记录，执行中"
+                        : proposal.result_summary?.outcome === "reconciliation_required"
+                          ? "执行结果待人工对账"
+                          : proposal.status}
                   </span>
+                  {proposal.result_summary?.outcome === "reconciliation_required" && (
+                    <p className="mt-2 text-xs text-destructive">
+                      CRM 动作可能已经生效，系统不会自动重试。请先核对目标对象和执行记录。
+                    </p>
+                  )}
                   {proposal.status === "executed" && proposal.can_undo && (
                     <button
                       disabled={busy}
