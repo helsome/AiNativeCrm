@@ -87,6 +87,30 @@ describe("signed Feishu internal facts", () => {
     expect(parseFeishuWebhook(card.raw, card.headers, config, now)).toEqual({ kind: "ignored" });
   });
 
+  it("accepts an exact binding token only from a signed private, unthreaded user message", () => {
+    const token = randomBytes(32).toString("base64url");
+    const binding = { ...event, event: { ...event.event,
+      message: { ...event.event.message, chat_type: "p2p", root_id: undefined,
+        content: JSON.stringify({ text: `CRM-BIND ${token}` }) } } };
+    const { raw, headers } = signed(encrypted(binding));
+    expect(parseFeishuWebhook(raw, headers, config, now)).toEqual({
+      kind: "binding_request", tenantKey: "tenant-a", eventId: "event-123",
+      openId: "ou_A", token,
+    });
+    const group = signed({ ...binding, event: { ...binding.event,
+      message: { ...binding.event.message, chat_type: "group" } } });
+    expect(parseFeishuWebhook(group.raw, group.headers, config, now))
+      .toEqual({ kind: "ignored" });
+    const threaded = signed({ ...binding, event: { ...binding.event,
+      message: { ...binding.event.message, root_id: "om_root" } } });
+    expect(parseFeishuWebhook(threaded.raw, threaded.headers, config, now))
+      .toEqual({ kind: "ignored" });
+    const malformed = signed({ ...binding, event: { ...binding.event,
+      message: { ...binding.event.message, content: JSON.stringify({ text: `CRM-BIND ${token} extra` }) } } });
+    expect(parseFeishuWebhook(malformed.raw, malformed.headers, config, now))
+      .toEqual({ kind: "ignored" });
+  });
+
   it("accepts only authenticated challenges and makes stable event keys", () => {
     const challenge = signed({ type: "url_verification", token: config.verificationToken,
       challenge: "challenge-a" });

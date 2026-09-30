@@ -1,6 +1,8 @@
 import type { NextRequest } from "next/server";
 import { getRequestPool } from "@/lib/agent-engine/db/request-pool";
+import { audit } from "@/lib/audit";
 import { MissionInternalResponseError } from "@/lib/ai/agents/mission-internal-response";
+import { consumeFeishuBinding } from "@/lib/ai/internal-collaboration/feishu-binding";
 import { persistFeishuMissionEvent } from "@/lib/ai/internal-collaboration/feishu-mission";
 import { FeishuWebhookError, parseFeishuWebhook } from "@/lib/ai/internal-collaboration/feishu-webhook";
 
@@ -31,6 +33,24 @@ export async function POST(request: NextRequest): Promise<Response> {
   }
   if (event.kind === "challenge") return Response.json({ challenge: event.challenge });
   if (event.kind === "ignored") return Response.json({ code: 0, msg: "ignored" });
+  if (event.kind === "binding_request") {
+    try {
+      const result = await consumeFeishuBinding(getRequestPool(), event,
+        process.env.FEISHU_TENANT_KEY ?? "",
+        process.env.FEISHU_TENANT_ORGANIZATION_ID ?? "");
+      if (result.status === "bound") {
+        void audit({
+          action: "ai_internal.feishu_binding_completed",
+          actorUserId: result.userId!, organizationId: result.organizationId!,
+          resourceType: "ai_internal_identity",
+          metadata: { provider: "feishu" },
+        });
+      }
+      return Response.json({ code: 0, msg: result.status });
+    } catch {
+      return Response.json({ code: 1, msg: "unavailable" }, { status: 503 });
+    }
+  }
   try {
     const result = await persistFeishuMissionEvent(getRequestPool(), event);
     return Response.json({ code: 0, msg: result ? "accepted" : "unbound" });

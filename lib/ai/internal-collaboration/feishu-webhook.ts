@@ -10,6 +10,13 @@ export type FeishuWebhookPayload =
   | { kind: "challenge"; challenge: string }
   | { kind: "ignored" }
   | {
+      kind: "binding_request";
+      tenantKey: string;
+      eventId: string;
+      openId: string;
+      token: string;
+    }
+  | {
       kind: "internal_text";
       tenantKey: string;
       eventId: string;
@@ -112,6 +119,17 @@ export function parseFeishuWebhook(
   const chatId = nonempty(message.chat_id);
   const rootMessageId = nonempty(message.root_id) ?? nonempty(message.parent_id);
   const messageId = nonempty(message.message_id);
+  if (!rootMessageId && message.chat_type === "p2p") {
+    if (!tenantKey || !eventId || !openId || !chatId || !messageId ||
+        typeof message.content !== "string" || message.content.length > 8_192)
+      throw new FeishuWebhookError("invalid_payload");
+    const content = nonempty(readJson(message.content).text, 2_000)?.trim();
+    const match = /^CRM-BIND ([A-Za-z0-9_-]{43})$/.exec(content ?? "");
+    if (!match) return { kind: "ignored" };
+    const token = match[1]!;
+    if (Buffer.from(token, "base64url").length !== 32) return { kind: "ignored" };
+    return { kind: "binding_request", tenantKey, eventId, openId, token };
+  }
   // Most IM messages are not replies to a Mission question. A short "可以" is
   // also not enough to become a fact, and must never be treated as approval.
   if (!rootMessageId) return { kind: "ignored" };
@@ -120,6 +138,7 @@ export function parseFeishuWebhook(
     throw new FeishuWebhookError("invalid_payload");
   const content = nonempty(readJson(message.content).text, 2_000)?.trim();
   if (!content || content.length < 5) return { kind: "ignored" };
+  if (/^CRM-BIND [A-Za-z0-9_-]{43}$/.test(content)) return { kind: "ignored" };
   return { kind: "internal_text", tenantKey, eventId, openId, chatId,
     rootMessageId, messageId, content };
 }

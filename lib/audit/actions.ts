@@ -797,6 +797,8 @@ export const AUDIT_ACTIONS = [
   "external_db_connection.read",
   "ai_mission.internal_question_queued",
   "ai_mission.manager_direction",
+  "ai_internal.feishu_binding_started",
+  "ai_internal.feishu_binding_completed",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */

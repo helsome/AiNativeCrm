@@ -21,6 +21,7 @@
 | `20260930090000` | `0399_ai_mission_direction_consumption` | 区分负责人方向“已接受”与“模型已消费”：方向输入绑定修订，Mission 记录已消费修订；只有成功模型回合确实带有当前方向时，Worker 才把私有 transcript、方向确认和不含原文的 Run 事件同事务提交。 |
 | `20260930100000` | `0400_workbench_send_decision_recovery` | 客户回复审批与 Pi 续跑之间增加服务端私有幂等回执；批准后请求中断时，Worker 可从提案和草稿事实恢复观察结果与队列任务，不重复发送。 |
 | `20260930110000` | `0401_workbench_send_atomic_claim` | `send_message` 决策不再预先通过 HTTP 占用 Run；回复草稿触发器只在 Run 仍等待确认时将审批、提案、发送任务及 Run 认领作为同一数据库事务提交。 |
+| `20260930120000` | `0402_ai_internal_identity_pairing` | CRM 登录成员发起十分钟一次性飞书绑定挑战，只保存口令 SHA-256；签名私聊回调核验后原子绑定租户/成员，并记录来源事件以防重放。租户首次认领还受服务端组织 UUID 白名单约束。 |
 
 Migrations applied to Supabase project `rrydmwnporysaiysiztn` (sa-east-1, Postgres 17) via Supabase MCP on 2026-04-28.
 

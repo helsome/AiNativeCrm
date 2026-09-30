@@ -1,13 +1,16 @@
-import { requireAuth } from "@/lib/auth/server";
+import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
+import { roleAtLeast } from "@/lib/auth/types";
 import { traduzir } from "@/lib/i18n/dicionario";
 import { normalizarIdioma } from "@/lib/i18n/idiomas";
 import { SEM_PREFERENCIA_DE_IDIOMA } from "@/lib/schemas/settings";
 import { ProfileForm } from "./_form";
+import { FeishuBinding } from "./_feishu-binding";
 
 export const dynamic = "force-dynamic";
 
 export default async function ProfilePage() {
   const user = await requireAuth();
+  const org = await resolveActiveOrg(user);
   // `locale` já vem tipado em AuthUser (loadAuthUser lê user_metadata.locale) —
   // o comentário antigo dizia que não vinha; estava desatualizado. `timezone`
   // não está em AuthUser e segue pelo cast do meta, como full_name/avatar_url.
@@ -41,6 +44,7 @@ export default async function ProfilePage() {
         initialLocale={user.locale ? normalizarIdioma(user.locale) : SEM_PREFERENCIA_DE_IDIOMA}
         initialTimezone={meta.timezone ?? "America/Sao_Paulo"}
       />
+      {org && roleAtLeast(org.role, "agent") && <FeishuBinding />}
     </div>
   );
 }
