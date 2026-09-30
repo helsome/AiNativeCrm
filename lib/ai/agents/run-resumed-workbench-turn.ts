@@ -1,5 +1,7 @@
 import { appendWorkbenchEvent } from "@/lib/ai/agents/workbench-events";
-import { persistMissionRunMessagesAndDirectionAck } from "@/lib/ai/agents/mission-direction-consumption";
+import {
+  loadMissionDirectionContextProbe, persistMissionRunMessagesAndDirectionAck,
+} from "@/lib/ai/agents/mission-direction-consumption";
 import { MissionBudgetExceededError } from "@/lib/ai/agents/mission-budget";
 import { continueWorkbenchMessages } from "@/lib/ai/agents/workbench-state";
 import { executeReversibleLeadUpdate } from "@/lib/ai/agents/reversible-lead-update";
@@ -195,6 +197,12 @@ export async function runResumedWorkbenchTurn(input: {
       throw new Error("workbench_result_tool_name_collision");
     Object.assign(gatedTools, resultChannel.tools);
     const modelDeps = { pool: getRequestPool(), llmCfg: deps.llmCfg, log: deps.log, runtime: deps.runtime };
+    const contextProbe = input.missionId
+      ? await loadMissionDirectionContextProbe(getRequestPool(), {
+          organizationId, missionId: input.missionId, runId,
+          expectedRevision: input.runtimeState.directionRevision,
+        })
+      : undefined;
     const modelCallInput = {
         tenantId: organizationId,
         jobId: input.jobId,
@@ -206,6 +214,7 @@ export async function runResumedWorkbenchTurn(input: {
         system: `${agentConfig.systemPrompt}\n\nUse CRM tools to verify facts. Follow the run mode and tool policy. Never claim a staged write or external action is complete.\n${WORKBENCH_RESULT_INSTRUCTION}`,
         messages: [],
         runtimeMessages: input.messages,
+        ...(contextProbe ? { contextProbe } : {}),
         tools: gatedTools as ToolSet,
         maxSteps: input.budget.maxSteps ?? agentConfig.maxSteps,
         abortSignal: abortController.signal,

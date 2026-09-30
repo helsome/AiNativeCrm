@@ -7,7 +7,9 @@ import { getRequestPool } from "@/lib/agent-engine/db/request-pool";
 import { buildMcpTurnTools } from "@/lib/agent-engine/edge/crm/mcp-tools";
 import type { RunModelCallInput, ToolSet } from "@/lib/agent-engine/edge/llm/run-model-call";
 import { appendWorkbenchEvent } from "@/lib/ai/agents/workbench-events";
-import { persistMissionRunMessagesAndDirectionAck } from "@/lib/ai/agents/mission-direction-consumption";
+import {
+  loadMissionDirectionContextProbe, persistMissionRunMessagesAndDirectionAck,
+} from "@/lib/ai/agents/mission-direction-consumption";
 import { appendWorkbenchObservation, parseRuntimeMessages } from "@/lib/ai/agents/workbench-state";
 import { executeReversibleLeadUpdate } from "@/lib/ai/agents/reversible-lead-update";
 import {
@@ -411,6 +413,12 @@ export async function runWorkbenchStartJob(
       return;
     }
     const modelDeps = { pool: getRequestPool(), llmCfg: deps.llmCfg, log: deps.log, runtime: deps.runtime };
+    const contextProbe = run.mission_id
+      ? await loadMissionDirectionContextProbe(pool, {
+          organizationId: job.organization_id, missionId: run.mission_id, runId,
+          expectedRevision: runtime.directionRevision,
+        })
+      : undefined;
     const modelCallInput = {
         tenantId: job.organization_id,
         jobId: job.id,
@@ -422,6 +430,7 @@ export async function runWorkbenchStartJob(
         system: `${modelAgentConfig.systemPrompt}\n\nUse CRM tools to verify facts. Follow the run mode and tool policy. Never claim a staged write or external action is complete.\n${WORKBENCH_RESULT_INSTRUCTION}`,
         messages: resumeMessages ? [] : [{ role: "user", content: taskWithScope }],
         ...(resumeMessages ? { runtimeMessages: resumeMessages as never } : {}),
+        ...(contextProbe ? { contextProbe } : {}),
         tools: gatedTools as ToolSet,
         maxSteps: remainingMaxSteps,
         abortSignal: abortController.signal,

@@ -179,6 +179,19 @@ describe("Vercel AI compatibility adapter", () => {
       .toEqual([{ type: "steering_consumed", data: { steeringId: "direction-1" } }]);
   });
 
+  it("forwards a private model-context probe without exposing its text in events", async () => {
+    const direction = JSON.stringify("先核对新的报价");
+    const probeId = "manager-direction:mission-1:1";
+    const result = await runPiAiSdkCall({
+      system: "CRM", messages: [{ role: "user", content: `负责人方向：${direction}` }],
+      model, runtime: runtimeWithFaux([fauxAssistantMessage("已核对")]),
+      contextProbe: { id: probeId, userText: direction },
+    });
+    expect(result.events.filter((event) => event.type === "model_context_consumed"))
+      .toEqual([{ type: "model_context_consumed", data: { probeId } }]);
+    expect(JSON.stringify(result.events)).not.toContain(direction);
+  });
+
   it("continues from CRM-owned runtime messages without replaying completed tool calls", async () => {
     const execute = vi.fn(async () => ({ shouldNeverRun: true }));
     const resumed = await runPiAiSdkCall({

@@ -116,6 +116,37 @@ describe("PiAgentRuntime", () => {
     );
   });
 
+  it("proves a direction reached the final model context without logging its text", async () => {
+    const direction = JSON.stringify("先按新的报价依据核对");
+    const contextProbe = { id: "manager-direction:mission-1:2", userText: direction };
+    const { runtime } = runtimeWithFaux([fauxAssistantMessage("已核对")]);
+    const result = await runtime.run({ systemPrompt: "CRM", prompt: `负责人方向：${direction}`,
+      model, contextProbe });
+    expect(result.events.filter((event) => event.type === "model_context_consumed"))
+      .toEqual([{ type: "model_context_consumed", data: { probeId: contextProbe.id } }]);
+    expect(JSON.stringify(result.events)).not.toContain(direction);
+  });
+
+  it("does not claim direction consumption after context filtering or a failed turn", async () => {
+    const direction = JSON.stringify("先按新的报价依据核对");
+    const contextProbe = { id: "manager-direction:mission-1:2", userText: direction };
+    const filtered = runtimeWithFaux([fauxAssistantMessage("没有新方向")]);
+    const filteredResult = await filtered.runtime.run({ systemPrompt: "CRM",
+      prompt: `负责人方向：${direction}`, model, contextProbe,
+      transformContext: (messages) => messages.filter((message) =>
+        message.role !== "user" || !(typeof message.content === "string"
+          ? message.content.includes(direction)
+          : message.content.some((part) => part.type === "text" && part.text.includes(direction)))),
+    });
+    expect(filteredResult.events.some((event) => event.type === "model_context_consumed"))
+      .toBe(false);
+    const failed = runtimeWithFaux([fauxAssistantMessage("", { stopReason: "error" })]);
+    const failedResult = await failed.runtime.run({ systemPrompt: "CRM",
+      prompt: `负责人方向：${direction}`, model, contextProbe });
+    expect(failedResult.events.some((event) => event.type === "model_context_consumed"))
+      .toBe(false);
+  });
+
   it("keeps private reasoning out of the answer while preserving provider continuation", async () => {
     const { runtime } = runtimeWithFaux([
       fauxAssistantMessage([

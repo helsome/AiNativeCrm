@@ -3,8 +3,9 @@ import type { AgentRuntimeEvent, RuntimeMessage } from "@/lib/agent-runtime";
 import { directionReachedModel } from "./mission-direction-consumption";
 
 const direction = "先核对\"新版\"报价，再联系客户";
+const probeId = "manager-direction:mission-1:2";
 const successful: AgentRuntimeEvent[] = [
-  { type: "turn_end", data: { stop_reason: "stop" } },
+  { type: "model_context_consumed", data: { probeId } },
 ];
 const transcript: RuntimeMessage[] = [
   { role: "user", content: `负责人方向：${JSON.stringify(direction)}` },
@@ -13,14 +14,14 @@ const transcript: RuntimeMessage[] = [
 
 describe("Mission direction consumption evidence", () => {
   it("requires the serialized direction in the actual model prompt and a successful turn", () => {
-    expect(directionReachedModel(transcript, successful, direction)).toBe(true);
-    expect(directionReachedModel([{ role: "user", content: "旧方向" }], successful, direction))
+    expect(directionReachedModel(transcript, successful, direction, probeId)).toBe(true);
+    expect(directionReachedModel([{ role: "user", content: "旧方向" }], successful, direction, probeId))
       .toBe(false);
     expect(directionReachedModel(transcript,
-      [{ type: "steering_queued", data: { steeringId: "direction-1" } }], direction)).toBe(false);
+      [{ type: "steering_queued", data: { steeringId: "direction-1" } }], direction, probeId)).toBe(false);
     expect(directionReachedModel(transcript,
-      [{ type: "turn_end", data: { stop_reason: "error" } }], direction)).toBe(false);
+      [{ type: "turn_end", data: { stop_reason: "stop" } }], direction, probeId)).toBe(false);
     expect(directionReachedModel(transcript,
-      [{ type: "turn_end", data: { stop_reason: "aborted" } }], direction)).toBe(false);
+      [{ type: "model_context_consumed", data: { probeId: "other" } }], direction, probeId)).toBe(false);
   });
 });

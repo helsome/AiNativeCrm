@@ -3,6 +3,42 @@ import type { AgentRuntimeEvent, RuntimeContent, RuntimeMessage } from "@/lib/ag
 import { MissionDirectionFenceError } from "@/lib/ai/agents/mission-direction-fence";
 import { parseRuntimeMessages } from "@/lib/ai/agents/workbench-state";
 
+function directionProbeId(missionId: string, revision: number): string {
+  return `manager-direction:${missionId}:${revision}`;
+}
+
+/** Load a scoped, in-memory probe immediately before the root model call. */
+export async function loadMissionDirectionContextProbe(
+  pool: Pool,
+  input: { organizationId: string; missionId: string; runId: string; expectedRevision: unknown },
+): Promise<{ id: string; userText: string } | undefined> {
+  if (typeof input.expectedRevision !== "number" ||
+      !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0)
+    throw new MissionDirectionFenceError("revision_missing");
+  const { rows } = await pool.query<{
+    current_direction: string | null; direction_revision: string; run_revision: string | null;
+    run_status: string;
+  }>(
+    `select m.current_direction,m.direction_revision::text as direction_revision,
+            r.runtime_state->>'directionRevision' as run_revision,r.status as run_status
+     from public.ai_workbench_runs r
+     join public.ai_missions m on m.organization_id=r.organization_id and m.id=r.mission_id
+     where r.organization_id=$1 and r.id=$2 and r.mission_id=$3 and r.run_kind='root'`,
+    [input.organizationId, input.runId, input.missionId],
+  );
+  const row = rows[0];
+  if (!row || row.run_status !== "running")
+    throw new MissionDirectionFenceError("run_inactive");
+  if (row.direction_revision !== String(input.expectedRevision) ||
+      row.run_revision !== String(input.expectedRevision))
+    throw new MissionDirectionFenceError("revision_changed");
+  if (!row.current_direction) return undefined;
+  return {
+    id: directionProbeId(input.missionId, input.expectedRevision),
+    userText: JSON.stringify(row.current_direction),
+  };
+}
+
 function textOf(content: string | RuntimeContent[]): string {
   return typeof content === "string" ? content
     : content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
@@ -13,12 +49,12 @@ export function directionReachedModel(
   messages: RuntimeMessage[],
   events: AgentRuntimeEvent[],
   direction: string,
+  probeId: string,
 ): boolean {
   return messages.some((message) => message.role === "user" &&
     textOf(message.content).includes(JSON.stringify(direction))) &&
-    events.some((event) => event.type === "turn_end" &&
-      typeof event.data.stop_reason === "string" &&
-      !["error", "aborted"].includes(event.data.stop_reason));
+    events.some((event) => event.type === "model_context_consumed" &&
+      event.data.probeId === probeId);
 }
 
 async function appendConsumedEvent(
@@ -103,6 +139,7 @@ export async function persistMissionRunMessagesAndDirectionAck(
     )) throw new MissionDirectionFenceError("revision_changed");
     if (mission.current_direction && !directionReachedModel(
       input.messages, input.events, mission.current_direction,
+      directionProbeId(input.missionId, revision),
     )) throw new MissionDirectionFenceError("context_missing");
 
     await client.query(

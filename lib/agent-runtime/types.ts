@@ -130,7 +130,8 @@ export interface AgentRuntimeEvent {
     | "tool_execution_update"
     | "tool_execution_end"
     | "steering_queued"
-    | "steering_consumed";
+    | "steering_consumed"
+    | "model_context_consumed";
   data: Record<string, unknown>;
 }
 
@@ -147,6 +148,8 @@ export interface AgentTurnInput {
     messages: RuntimeMessage[],
     signal?: AbortSignal,
   ) => RuntimeMessage[] | Promise<RuntimeMessage[]>;
+  /** In-memory proof only: never include userText in events or product traces. */
+  contextProbe?: { id: string; userText: string };
   beforeToolCall?: (input: {
     name: string;
     args: Record<string, unknown>;

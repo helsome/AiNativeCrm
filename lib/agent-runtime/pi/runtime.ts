@@ -276,6 +276,10 @@ export class PiAgentRuntime implements AgentRuntime {
     // request. The CRM contract promises cancellation at the runtime boundary,
     // so reject before constructing the loop as well.
     input.abortSignal?.throwIfAborted();
+    if (input.contextProbe && (
+      !input.contextProbe.id.trim() || input.contextProbe.id.length > 200 ||
+      !input.contextProbe.userText.trim() || input.contextProbe.userText.length > 20_000
+    )) throw new Error("pi_context_probe_invalid");
     const [{ Agent }, { Type }, resolved] = await Promise.all([
       loadPiAgentCore(),
       loadPiAi(),
@@ -290,6 +294,8 @@ export class PiAgentRuntime implements AgentRuntime {
     const steeringMessages = new Map<AgentMessage, string>();
     const steeringInModelContext = new Set<string>();
     const steeringSentToModel = new Set<string>();
+    let contextProbeSeenInCurrentModelRequest = false;
+    let contextProbeAcknowledged = false;
 
     const tools: AgentTool[] = (input.tools ?? []).map((tool) => {
       const parameters = Type.Unsafe(tool.inputSchema);
@@ -343,6 +349,13 @@ export class PiAgentRuntime implements AgentRuntime {
             message.role === "assistant" ||
             message.role === "toolResult",
         );
+        // Pi calls convertToLlm after transformContext and immediately before
+        // constructing the provider request. The transcript alone is weaker:
+        // a future context transform may remove the manager's instruction.
+        const probe = input.contextProbe;
+        contextProbeSeenInCurrentModelRequest = probe !== undefined &&
+          modelMessages.some((message) => message.role === "user" &&
+            textOf(message.content).includes(probe.userText));
         // transformContext may remove a direction after Pi appended it to its
         // transcript. A message_end event alone is not proof it reached the LLM.
         for (const steeringId of steeringInModelContext) {
@@ -444,6 +457,16 @@ export class PiAgentRuntime implements AgentRuntime {
         if (steeringId !== undefined) steeringInModelContext.add(steeringId);
       }
       if (event.type !== "turn_end" || event.message.role !== "assistant") return;
+      if (!contextProbeAcknowledged && contextProbeSeenInCurrentModelRequest && input.contextProbe &&
+          event.message.stopReason !== "error" && event.message.stopReason !== "aborted") {
+        const consumed: AgentRuntimeEvent = {
+          type: "model_context_consumed", data: { probeId: input.contextProbe.id },
+        };
+        events.push(consumed);
+        await input.onEvent?.(consumed);
+        contextProbeAcknowledged = true;
+      }
+      contextProbeSeenInCurrentModelRequest = false;
       if (event.message.stopReason !== "error" && event.message.stopReason !== "aborted") {
         for (const steeringId of steeringSentToModel) {
           const consumed: AgentRuntimeEvent = { type: "steering_consumed", data: { steeringId } };

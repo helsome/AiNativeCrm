@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { submitMissionInternalResponse,
   submitMissionManagerDirection } from "@/lib/ai/agents/mission-internal-response";
-import { persistMissionRunMessagesAndDirectionAck } from
+import { loadMissionDirectionContextProbe, persistMissionRunMessagesAndDirectionAck } from
   "@/lib/ai/agents/mission-direction-consumption";
 import { submitFeishuMissionText } from "@/lib/ai/internal-collaboration/feishu-mission";
 import { persistFeishuMissionEvent } from "@/lib/ai/internal-collaboration/feishu-mission";
@@ -905,8 +905,22 @@ describe("internal Mission input ledger", () => {
         content: `负责人新方向：${JSON.stringify(CONSUMPTION.direction)}` },
       { role: "assistant" as const, content: "已读取并核对最新报价" },
     ];
-    const events = [{ type: "turn_end" as const, data: { stop_reason: "stop" } }];
+    const events = [{ type: "model_context_consumed" as const,
+      data: { probeId: `manager-direction:${CONSUMPTION.mission}:1` } }];
     try {
+      expect(await loadMissionDirectionContextProbe(pool, {
+        organizationId: A.org, missionId: CONSUMPTION.mission,
+        runId: CONSUMPTION.run, expectedRevision: 1,
+      })).toEqual({ id: `manager-direction:${CONSUMPTION.mission}:1`,
+        userText: JSON.stringify(CONSUMPTION.direction) });
+      await expect(loadMissionDirectionContextProbe(pool, {
+        organizationId: B.org, missionId: CONSUMPTION.mission,
+        runId: CONSUMPTION.run, expectedRevision: 1,
+      })).rejects.toMatchObject({ code: "run_inactive" });
+      await expect(loadMissionDirectionContextProbe(pool, {
+        organizationId: A.org, missionId: CONSUMPTION.mission,
+        runId: CONSUMPTION.run, expectedRevision: 0,
+      })).rejects.toMatchObject({ code: "revision_changed" });
       const input = { organizationId: A.org, missionId: CONSUMPTION.mission,
         runId: CONSUMPTION.run, expectedRevision: 1, messages, events };
       expect(await persistMissionRunMessagesAndDirectionAck(pool, input))
@@ -954,7 +968,8 @@ describe("internal Mission input ledger", () => {
         runId: CONSUMPTION_MISSING.run, expectedRevision: 1,
         messages: [{ role: "user", content: "旧任务，不含负责人新方向" },
           { role: "assistant", content: "继续旧计划" }],
-        events: [{ type: "turn_end", data: { stop_reason: "stop" } }],
+        events: [{ type: "model_context_consumed",
+          data: { probeId: `manager-direction:${CONSUMPTION_MISSING.mission}:1` } }],
       })).rejects.toMatchObject({ code: "context_missing" });
       const { rows } = await pool.query<{ consumed_revision: string; state_count: string }>(
         `select m.direction_consumed_revision::text as consumed_revision,

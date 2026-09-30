@@ -19,6 +19,10 @@ vi.mock("@/lib/ai/agents/mission-direction-fence", async (importOriginal) => ({
   ...await importOriginal(),
   stopMissionRunAfterDirectionFence: mocks.stopForDirection,
 }));
+vi.mock("@/lib/ai/agents/mission-direction-consumption", async (importOriginal) => ({
+  ...await importOriginal(),
+  loadMissionDirectionContextProbe: vi.fn(async () => undefined),
+}));
 vi.mock("@/lib/agent-engine/db/request-pool", () => ({ getRequestPool: () => ({ query: mocks.query }) }));
 vi.mock("@/lib/agent-engine/agent/request-deps", () => ({
   requestTurnDeps: () => ({ crmCfg: {}, llmCfg: {}, log: {}, runtime: {} }),
