@@ -20,6 +20,7 @@ import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { conferirContratoWaha, lerRoteamentoWaha } from "@/lib/waha/envelope";
 import { dispatchWahaEvent } from "@/lib/waha/ingest";
+import { signedInboundWitness } from "@/lib/waha/signed-inbound-witness";
 import { authenticateWahaWebhook } from "@/lib/waha/webhook-auth";
 
 export const dynamic = "force-dynamic";
@@ -147,7 +148,7 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
     if (key.toLowerCase() === "cookie") return;
     headersJson[key] = value;
   });
-  await admin.from("webhook_events_log").insert({
+  const { data: archivedEvent, error: archiveError } = await admin.from("webhook_events_log").insert({
     organization_id: session.organization_id,
     channel_session_id: session.id,
     provider: "waha",
@@ -162,6 +163,10 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
     external_id: externalId,
     status: "received",
     attempts: 0,
+  }).select("id").maybeSingle();
+  if (archiveError) logger.warn("waha.webhook: event log unavailable", {
+    organization_id: session.organization_id, channel_session_id: session.id,
+    error_code: archiveError.code,
   });
 
   // Estágio 2: o resto do contrato, agora que o corpo cru já está arquivado.
@@ -179,7 +184,11 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
   }
 
   try {
-    await dispatchWahaEvent(admin, session, contrato.envelope, requestId);
+    await dispatchWahaEvent(admin, session, contrato.envelope, requestId,
+      validSignature && archivedEvent?.id
+        ? signedInboundWitness(admin, { eventId: archivedEvent.id,
+          organizationId: session.organization_id, channelSessionId: session.id })
+        : undefined);
   } catch (err) {
     console.error("[waha.webhook] handler failed", err);
   }

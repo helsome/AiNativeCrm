@@ -141,6 +141,18 @@ describe("o chat não reconhecido deixa rastro", () => {
 });
 
 describe("o chat não reconhecido NÃO vira contato", () => {
+  it("vincula somente a mensagem que este webhook acabou de inserir", async () => {
+    const { admin } = bancoDeMentira();
+    const witness = vi.fn().mockResolvedValue(undefined);
+    await dispatchWahaEvent(admin as never, SESSION as never,
+      inbound("5511999999999@c.us"), "req-1", witness);
+    expect(witness).toHaveBeenCalledTimes(1);
+    expect(witness).toHaveBeenCalledWith("msg-1");
+    await dispatchWahaEvent(admin as never, SESSION as never,
+      inbound("120363000000000000@g.us"), "req-2", witness);
+    expect(witness).toHaveBeenCalledTimes(1);
+  });
+
   it("nunca chama fn_upsert_wa_contact com kind fora de phone|lid", async () => {
     // Esta é a asserção que impede a correção de introduzir algo pior que o
     // defeito. `wa_identity` é gerada e fica NULL para qualquer outro kind; como

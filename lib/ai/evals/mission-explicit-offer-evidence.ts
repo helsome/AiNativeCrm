@@ -5,7 +5,7 @@ import { explicitOfferTermsSchema, formatExplicitOffer } from "@/lib/ai/evals/mi
 
 export interface ExplicitOfferEvidence {
   offerId: string | null;
-  verdict: "not_issued" | "not_sent" | "awaiting_reply" | "verified" |
+  verdict: "not_issued" | "not_sent" | "awaiting_reply" | "unverified" | "verified" |
     "expired" | "superseded" | "conflict";
   reason: string;
   terms: {
@@ -158,8 +158,19 @@ async function evaluateExplicitOfferSnapshot(
      where m.organization_id=$1 and m.contact_id=$2 and m.conversation_id=$3
        and m.channel_session_id=$4 and m.direction='inbound' and m.type='text'
        and m.external_id is not null and m.body is not null
+       and m.edited_at is null and m.revoked_at is null
        and btrim(m.body)=$5 and m.sent_at>$6 and m.sent_at<=$7
        and m.sent_at<=now()
+       and exists (
+         select 1 from public.webhook_events_log w
+         where w.organization_id=m.organization_id
+           and w.channel_session_id=m.channel_session_id
+           and w.provider='waha' and w.valid_signature is true
+           and w.event_type in ('message','message.any')
+           and w.crm_inbound_message_id=m.id
+           and w.external_id=m.external_id
+           and w.received_at>$6 and w.received_at<=$7
+       )
      order by m.sent_at,m.id limit 1`,
     [organizationId, offer.contact_id, offer.conversation_id,
       offer.channel_session_id, offer.acceptance_text, sent.sent_at, offer.expires_at],
@@ -167,6 +178,21 @@ async function evaluateExplicitOfferSnapshot(
   if (inbound[0])
     return response(offer, "verified", "exact_customer_channel_confirmation",
       sent.message_id, inbound[0].id);
+  const { rows: unattributed } = await db.query<{ id: string }>(
+    `select m.id from public.messages m
+     where m.organization_id=$1 and m.contact_id=$2 and m.conversation_id=$3
+       and m.channel_session_id=$4 and m.direction='inbound' and m.type='text'
+       and m.external_id is not null and m.body is not null
+       and m.edited_at is null and m.revoked_at is null
+       and btrim(m.body)=$5 and m.sent_at>$6 and m.sent_at<=$7
+       and m.sent_at<=now()
+     order by m.sent_at,m.id limit 1`,
+    [organizationId, offer.contact_id, offer.conversation_id,
+      offer.channel_session_id, offer.acceptance_text, sent.sent_at, offer.expires_at],
+  );
+  if (unattributed[0])
+    return response(offer, "unverified", "customer_reply_signature_unverified",
+      sent.message_id, unattributed[0].id);
   return response(offer, Date.now() > offer.expires_at.getTime() ? "expired" : "awaiting_reply",
     "exact_customer_reply_missing", sent.message_id);
 }

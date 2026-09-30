@@ -37612,6 +37612,26 @@ revoke all on public.ai_mission_explicit_offers from public,anon,authenticated;
 grant select,insert,update,delete on public.ai_mission_explicit_offers to service_role;
 notify pgrst, 'reload schema';
 
+-- 0404 — bind a verified WAHA callback to its exact inserted CRM message.
+alter table public.webhook_events_log
+  add column if not exists crm_inbound_message_id uuid
+    references public.messages(id) on delete set null;
+alter table public.webhook_events_log
+  drop constraint if exists webhook_events_log_signed_inbound_shape;
+alter table public.webhook_events_log
+  add constraint webhook_events_log_signed_inbound_shape check (
+    crm_inbound_message_id is null or (
+      provider='waha' and valid_signature is true
+      and event_type in ('message','message.any')
+      and organization_id is not null and channel_session_id is not null
+      and external_id is not null
+    )
+  );
+create unique index if not exists webhook_events_log_signed_inbound_uidx
+  on public.webhook_events_log(crm_inbound_message_id)
+  where crm_inbound_message_id is not null;
+notify pgrst, 'reload schema';
+
 -- ---- VARREDURA anon: fecha os apêndices posteriores à migration 0116 ----
 -- O bloco original 0116 precede as migrations acrescentadas ao baseline ao
 -- longo do tempo. Reaplicar a mesma cura no fim mantém seguro também o caminho

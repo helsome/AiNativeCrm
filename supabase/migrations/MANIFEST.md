@@ -23,6 +23,7 @@
 | `20260930110000` | `0401_workbench_send_atomic_claim` | `send_message` 决策不再预先通过 HTTP 占用 Run；回复草稿触发器只在 Run 仍等待确认时将审批、提案、发送任务及 Run 认领作为同一数据库事务提交。 |
 | `20260930120000` | `0402_ai_internal_identity_pairing` | CRM 登录成员发起十分钟一次性飞书绑定挑战，只保存口令 SHA-256；签名私聊回调核验后原子绑定租户/成员，并记录来源事件以防重放。租户首次认领还受服务端组织 UUID 白名单约束。 |
 | `20260930130000` | `0403_ai_mission_explicit_offers` | 负责人锁定结构化报价、币种、交期和客户会话，生成可重放的确切客户确认文本；组织内同 Mission 仅一个当前版本，旧版被取代。服务端独占访问，复合外键约束会话、联系人和渠道属于同一组织。 |
+| `20260930140000` | `0404_signed_waha_inbound_witness` | 已验签 WAHA 消息回调只可绑定它实际新增的 CRM 入站消息 ID；报价验收不再把单独的外部消息 ID 或未签名入站当成客户确认凭据。 |
 
 Migrations applied to Supabase project `rrydmwnporysaiysiztn` (sa-east-1, Postgres 17) via Supabase MCP on 2026-04-28.
 

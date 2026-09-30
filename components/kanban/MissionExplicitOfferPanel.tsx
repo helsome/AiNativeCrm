@@ -5,7 +5,7 @@ import { randomId } from "@/lib/random-id";
 
 type Evidence = {
   offerId: string | null;
-  verdict: "not_issued" | "not_sent" | "awaiting_reply" | "verified" |
+  verdict: "not_issued" | "not_sent" | "awaiting_reply" | "unverified" | "verified" |
     "expired" | "superseded" | "conflict";
   reason: string;
   terms: { description: string; amountMinor: number; currency: string;
@@ -24,6 +24,7 @@ const labels: Record<Evidence["verdict"], string> = {
   not_issued: "尚未固定明确条款",
   not_sent: "确切报价文本尚无完整发送凭证",
   awaiting_reply: "报价已核对发送，等待客户完整确认码",
+  unverified: "找到完整确认回复，但渠道回调未验签；不能据此确认客户接受",
   verified: "客户渠道已明确确认这版报价与交期",
   expired: "确认请求已过期",
   superseded: "报价已被新方向、客户变更或取消取代",

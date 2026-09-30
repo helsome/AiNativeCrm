@@ -188,12 +188,54 @@ describe("explicit offer acceptance on real CRM tables", () => {
       [a.accepted, a.org, a.conversation, a.session, a.contact,
         offer.acceptance_text],
     );
+    expect((await evaluateExplicitOffer(pool, a.org, a.mission)).verdict).toBe("unverified");
+    await expect(pool.query(
+      `insert into public.webhook_events_log
+       (organization_id,channel_session_id,provider,raw_body,valid_signature,
+        event_type,external_id,crm_inbound_message_id,received_at)
+       values ($1,$2,'waha','{}',false,'message','waha-accepted',$3,now())`,
+      [a.org, a.session, a.accepted],
+    )).rejects.toMatchObject({ code: "23514" });
+    await pool.query(
+      `insert into public.webhook_events_log
+       (organization_id,channel_session_id,provider,raw_body,valid_signature,
+        event_type,external_id,received_at)
+       values ($1,$2,'waha','{}',false,'message','waha-accepted',now())`,
+      [a.org, a.session],
+    );
+    expect((await evaluateExplicitOffer(pool, a.org, a.mission)).verdict).toBe("unverified");
+    await pool.query(
+      `insert into public.webhook_events_log
+       (organization_id,channel_session_id,provider,raw_body,valid_signature,
+        event_type,external_id,received_at)
+       values ($1,$2,'waha','{}',true,'message','waha-accepted',now())`,
+      [b.org, a.session],
+    );
+    expect((await evaluateExplicitOffer(pool, a.org, a.mission)).verdict).toBe("unverified");
+    await pool.query(
+      `insert into public.webhook_events_log
+       (organization_id,channel_session_id,provider,raw_body,valid_signature,
+        event_type,external_id,received_at)
+       values ($1,$2,'waha','{}',true,'message','waha-accepted',now())`,
+      [a.org, a.session],
+    );
+    expect((await evaluateExplicitOffer(pool, a.org, a.mission)).verdict).toBe("unverified");
+    await pool.query(
+      `insert into public.webhook_events_log
+       (organization_id,channel_session_id,provider,raw_body,valid_signature,
+        event_type,external_id,crm_inbound_message_id,received_at)
+       values ($1,$2,'waha','{}',true,'message','waha-accepted',$3,now())`,
+      [a.org, a.session, a.accepted],
+    );
     expect(await evaluateExplicitOffer(pool, a.org, a.mission)).toMatchObject({
       offerId: offer.id, verdict: "verified", structuredTermsAccepted: true,
       outboundMessageId: a.message, inboundMessageId: a.accepted,
       legalIdentityVerified: false, businessOutcomeVerified: false,
       terms,
     });
+    await pool.query(`update public.messages set revoked_at=now() where id=$1`, [a.accepted]);
+    expect((await evaluateExplicitOffer(pool, a.org, a.mission)).verdict).toBe("awaiting_reply");
+    await pool.query(`update public.messages set revoked_at=null where id=$1`, [a.accepted]);
     await pool.query(`update public.ai_missions set direction_revision=direction_revision+1
       where id=$1`, [a.mission]);
     expect((await evaluateExplicitOffer(pool, a.org, a.mission)).verdict).toBe("superseded");

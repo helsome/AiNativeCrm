@@ -591,6 +591,7 @@ async function handleInbound(
   session: Session,
   p: WahaPayload,
   requestId: string,
+  onPersistedInbound?: (messageId: string) => Promise<void>,
 ): Promise<void> {
   const chatId = p.from ?? "";
   const parsed = parseChatId(chatId);
@@ -716,6 +717,12 @@ async function handleInbound(
     }
     return;
   }
+
+  // A signed webhook can witness only the row inserted by this invocation.
+  // A replay that hits the external-ID unique key must never launder an older
+  // unsigned or otherwise forged row into authenticated customer evidence.
+  if (insertedMessage?.id && onPersistedInbound)
+    await onPersistedInbound(insertedMessage.id);
 
   await markConversation(admin, session.organization_id, conversationId, "inbound", previewFromMessage(p), dataDoTimestamp(p.timestamp, now));
 
@@ -1129,6 +1136,7 @@ export async function dispatchWahaEvent(
   session: SessionStatusRow,
   envelope: WahaEnvelope,
   requestId: string,
+  onPersistedInbound?: (messageId: string) => Promise<void>,
 ): Promise<void> {
   const eventType = envelope.event ?? "unknown";
   const payload: WahaPayload = envelope.payload ?? {};
@@ -1137,7 +1145,7 @@ export async function dispatchWahaEvent(
     if (payload.fromMe) {
       await handleOutboundFromUserPhone(admin, session, payload, requestId);
     } else {
-      await handleInbound(admin, session, payload, requestId);
+      await handleInbound(admin, session, payload, requestId, onPersistedInbound);
     }
   } else if (eventType === "message.ack") {
     await handleAck(admin, session, payload);
