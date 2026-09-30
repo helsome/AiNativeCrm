@@ -182,6 +182,22 @@ export function decidirBinding(entrada: EntradaDaDecisao): DecisaoDeBinding {
     };
   }
 
+  // Um specialist pertence à missão em execução, não ao agente publicado que
+  // a página de provedores escolheu para ilustrar outros pontos. Sem o pai
+  // concreto, mostrar seu modelo seria um palpite; em runtime o override traz
+  // provider, modelo e credencial juntos.
+  if (entrada.pontoId === "agent_specialist") {
+    const pai = entrada.agentePublicado;
+    return {
+      provider: pai?.model ? pai.provider : entrada.padraoDaOrganizacao.provider,
+      modelId: pai?.model ?? null,
+      credentialId: pai?.model ? pai.credentialId : null,
+      baseUrl: null,
+      origem: "herdado_de_quem_chamou",
+      avisos,
+    };
+  }
+
   // 1 · O agente publicado manda nos pontos que são o próprio agente.
   if (PONTOS_DO_AGENTE_PUBLICADO.has(entrada.pontoId) && entrada.agentePublicado !== null) {
     if (entrada.binding !== null && entrada.binding.is_enabled) {

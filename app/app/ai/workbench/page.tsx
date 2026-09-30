@@ -8,12 +8,23 @@ import { AgentCrmWorkbench } from "./_components/AgentCrmWorkbench";
 
 export const dynamic = "force-dynamic";
 
-export default async function AgentCrmWorkbenchPage() {
+export default async function AgentCrmWorkbenchPage({ searchParams }: {
+  searchParams: Promise<{ leadId?: string }>;
+}) {
   const user = await requireAuth();
   const org = await resolveActiveOrg(user);
   if (!org || !roleAtLeast(org.role, "manager")) redirect("/403");
   await ensureBuiltinAgents(org.orgId);
   const admin = createAdminClient();
+  const { leadId } = await searchParams;
+  const requestedLeadId = typeof leadId === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(leadId)
+    ? leadId : null;
+  const { data: initialLead } = requestedLeadId
+    ? await admin.from("crm_leads")
+        .select("id, title, pipeline_id")
+        .eq("organization_id", org.orgId).eq("id", requestedLeadId).maybeSingle()
+    : { data: null };
   const { data: agents, error } = await admin
     .from("ai_agents")
     .select("id, name, description, builtin_key, builtin_revision, model_binding_mode")
@@ -61,6 +72,11 @@ export default async function AgentCrmWorkbenchPage() {
         <p role="alert">加载内置 Agent 失败，请刷新重试。</p>
       ) : (
         <AgentCrmWorkbench
+          initialLead={initialLead ? {
+            id: initialLead.id,
+            title: initialLead.title,
+            pipelineId: initialLead.pipeline_id,
+          } : null}
           canCopy={roleAtLeast(org.role, "admin")}
           agents={(agents ?? []).map((agent) => {
             const definition = BUILTIN_AGENTS.find((item) => item.key === agent.builtin_key);

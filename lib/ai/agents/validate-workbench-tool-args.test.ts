@@ -13,6 +13,16 @@ describe("workbench proposal approval validation", () => {
     expect(validateWorkbenchToolArgs("send_message", { body: "回复", extra: true })).toEqual({ ok: false });
   });
 
+  it("revalidates an Agent's internal question at the human gate", () => {
+    const recipientUserId = "11111111-1111-4111-8111-111111111111";
+    expect(validateWorkbenchToolArgs("ask_internal_colleague", {
+      recipientUserId, question: "  请核对这笔商机的交期  ",
+    })).toEqual({ ok: true, args: { recipientUserId, question: "请核对这笔商机的交期" } });
+    expect(validateWorkbenchToolArgs("ask_internal_colleague", {
+      recipientUserId, question: "请核对交期", extra: "ignore",
+    })).toEqual({ ok: false });
+  });
+
   it("revalidates handoff identifiers and applies CRM schema defaults", () => {
     expect(validateWorkbenchToolArgs("crm_request_human_handoff", {
       conversation_id: CONVERSATION_ID,

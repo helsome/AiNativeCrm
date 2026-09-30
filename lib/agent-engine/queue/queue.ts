@@ -26,7 +26,9 @@ export type JobKind =
   | "transactional_delivery"
   | "approved_reply"
   | "workbench_start"
-  | "workbench_resume";
+  | "workbench_resume"
+  | "internal_im_event"
+  | "internal_im_question";
 export type JobStatus = "pending" | "running" | "done" | "failed" | "dead";
 
 export interface JobRow {

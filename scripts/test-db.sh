@@ -480,8 +480,11 @@ echo "==> banco \`postgres\` a partir do molde (o setupFile o recria a cada arqu
 #    tests/invariants/harness-isola-por-arquivo.test.ts aponta a regressão certa,
 #    com duas asserções, em vez de o run virar um muro de ruído.
 docker exec -i "$CONTAINER" psql -U postgres -d template1 -q -v ON_ERROR_STOP=1 -f - <<SQL
+alter database $TEMPLATE with allow_connections false;
+select pg_terminate_backend(pid) from pg_stat_activity where datname='$TEMPLATE';
 drop database if exists postgres with (force);
 create database postgres template $TEMPLATE;
+alter database $TEMPLATE with allow_connections true;
 SQL
 
 echo "==> invariantes: vitest (tests/invariants) — banco novo por ARQUIVO, ordem sorteada"

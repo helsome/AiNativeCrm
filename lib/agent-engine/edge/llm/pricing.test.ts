@@ -107,6 +107,28 @@ describe("costCents — id que a tabela não conhece volta NULL", () => {
   });
 });
 
+describe("costCents — OpenCode free model is provider-scoped and exact", () => {
+  it("records a verified free OpenCode call as zero, including cached tokens", () => {
+    expect(costCents("space-bunny-free", {
+      inputTokens: 1_000_000,
+      outputTokens: 500_000,
+      cacheReadTokens: 400_000,
+      cacheWriteTokens: 100_000,
+    }, "1h", "opencode", new Date("2026-09-29T00:00:00Z"))).toBe(0);
+  });
+
+  it("does not assume another provider or another OpenCode model is free", () => {
+    expect(costCents("space-bunny-free", NADA, "1h", "openrouter")).toBeNull();
+    expect(costCents("space-bunny-free", NADA)).toBeNull();
+    expect(costCents("space-bunny-free-v2", NADA, "1h", "opencode")).toBeNull();
+  });
+
+  it("returns unknown cost after the short free-price verification window", () => {
+    expect(costCents("space-bunny-free", NADA, "1h", "opencode", new Date("2026-10-06T00:00:00Z")))
+      .toBeNull();
+  });
+});
+
 describe("costCents — sufixo de data do vendor é tolerado", () => {
   it.each([
     ["claude-opus-4-1-20250805", 1500],

@@ -110,7 +110,6 @@ export const NAV_CATALOG = [
     icon: "Gauge",
     group: "analise",
     section: "Visão geral",
-    sidebar: true,
   },
   {
     href: "/app/ai/workbench",
@@ -120,6 +119,7 @@ export const NAV_CATALOG = [
     group: "ia",
     minRole: "manager",
     section: "Agente em ação",
+    sidebar: true,
   },
   {
     // SEM `sidebar: true`, e a razão não tem nada a ver com a qualidade desta
@@ -221,7 +221,7 @@ export const NAV_CATALOG = [
     sidebar: true,
   },
   {
-    // Extraída do PR #418 (contribuidor). Fica no CRM e no
+    // Extraída do PR #418 (@clinicacentrodosorrisosc-code). Fica no CRM e no
     // sidebar porque é tela de USO DIÁRIO — quem atende abre para ver o que
     // vence hoje, do mesmo jeito que abre o Inbox. Sem `minRole`: `viewer` VÊ
     // o que o time combinou (é informação de operação), e a criação é cobrada
@@ -401,7 +401,6 @@ export const NAV_CATALOG = [
     group: "ia",
     section: "Preparar o agente",
     minRole: "manager",
-    sidebar: true,
   },
   {
     href: "/app/ai/followups",

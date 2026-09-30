@@ -1,5 +1,6 @@
 import { catalogEntry } from "@/lib/mcp/tools/catalog";
 import type { ToolEffect } from "@/lib/agent-runtime";
+import { ASK_INTERNAL_COLLEAGUE_TOOL, LIST_INTERNAL_COLLEAGUES_TOOL } from "@/lib/ai/agents/internal-question-contract";
 
 export interface WorkbenchToolEffect {
   effect: ToolEffect;
@@ -17,6 +18,8 @@ const OVERRIDES: Record<string, WorkbenchToolEffect> = {
   crm_send_whatsapp_message: { effect: "external", resource: "messages" },
   crm_start_conversation_and_send: { effect: "external", resource: "conversations" },
   crm_request_human_handoff: { effect: "external", resource: "conversations" },
+  [LIST_INTERNAL_COLLEAGUES_TOOL]: { effect: "read", resource: "internal_colleagues" },
+  [ASK_INTERNAL_COLLEAGUE_TOOL]: { effect: "external", resource: "internal_questions" },
 };
 
 /** Unknown tools are unclassified and must be denied by the workbench harness. */

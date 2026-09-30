@@ -1,6 +1,8 @@
 import type { RuntimeContent, RuntimeMessage } from "@/lib/agent-runtime";
 import { workbenchToolEffect } from "@/lib/ai/agents/tool-effects";
 import { inspectProductFinalAnswer } from "@/lib/ai/agents/final-answer";
+import { workbenchResultDocumentSchema } from "@/lib/ai/agents/workbench-result-submission";
+import { auditWorkbenchEvidenceProvenance } from "@/lib/ai/evals/evidence-provenance";
 import type {
   AgentEvalDimensionKey,
   AgentEvalDimensionResult,
@@ -96,6 +98,53 @@ function evaluateAnswerQuality(input: AgentEvalRunInput, label: string): AgentEv
       { code: "answer_unavailable", message: "尚无可评测的最终答案。" },
     ]);
   const findings: AgentEvalFinding[] = [];
+  if (input.resultDocument != null) {
+    const parsed = workbenchResultDocumentSchema.safeParse(input.resultDocument);
+    if (!parsed.success)
+      return result("answer_quality", label, "fail", [
+        { code: "structured_result_invalid", message: "结构化结果不符合产品契约。" },
+      ]);
+    const provenance = auditWorkbenchEvidenceProvenance(parsed.data.evidence, input);
+    if (provenance.unobserved > 0)
+      findings.push({
+        code: "structured_result_unobserved_evidence",
+        message: "部分引用没有出现在本次运行的成功工具观察或持久化协作记录中。",
+        evidence: { unobserved: provenance.unobserved, total: parsed.data.evidence.length },
+      });
+    if (provenance.mismatched > 0)
+      findings.push({
+        code: "structured_fact_assertion_mismatch",
+        message: "部分结构化字段断言与本次运行实际观察到的 CRM 值不一致。",
+        evidence: { mismatched: provenance.mismatched },
+      });
+    if (provenance.unverifiable > 0)
+      findings.push({
+        code: "structured_fact_assertion_unverifiable",
+        message: "部分结构化字段断言不属于可核对字段，或成功工具观察中没有该字段。",
+        evidence: { unverifiable: provenance.unverifiable },
+      });
+    if (parsed.data.evidence.length === 0)
+      findings.push({
+        code: "structured_result_no_evidence",
+        message: "结构化结果没有可追溯的引用，不能据此证明事实性结论。",
+      });
+    else
+      findings.push({
+        code: "structured_claims_not_independently_verified",
+        message: "引用来源和显式字段断言已核对；自然语言声明及当前业务结果仍需独立复核。",
+        evidence: {
+          observed: provenance.observed,
+          total: parsed.data.evidence.length,
+          verifiedAssertions: provenance.verified,
+        },
+      });
+    if (parsed.data.missingInformation.length > 0)
+      findings.push({
+        code: "structured_result_missing_material",
+        message: "Agent 明确报告仍有缺失材料，不能将本次结果评为完整交付。",
+        evidence: { missingItems: parsed.data.missingInformation.length },
+      });
+  }
   const inspection = inspectProductFinalAnswer(text);
   for (const code of inspection.internalDraftCodes)
     findings.push({
@@ -118,7 +167,10 @@ function evaluateAnswerQuality(input: AgentEvalRunInput, label: string): AgentEv
     });
   if (
     findings.some(
-      (finding) => finding.code.startsWith("internal_") || finding.code === "answer_likely_truncated",
+      (finding) => finding.code.startsWith("internal_") ||
+        finding.code === "answer_likely_truncated" ||
+        finding.code === "structured_result_unobserved_evidence" ||
+        finding.code === "structured_fact_assertion_mismatch",
     )
   )
     return result("answer_quality", label, "fail", findings);

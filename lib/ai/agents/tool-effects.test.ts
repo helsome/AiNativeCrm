@@ -19,5 +19,7 @@ describe("CRM workbench effect registry", () => {
     expect(workbenchToolEffect("crm_create_lead")?.effect).toBe("irreversible");
     expect(workbenchToolEffect("crm_send_whatsapp_message")?.effect).toBe("external");
     expect(workbenchToolEffect("crm_request_human_handoff")?.effect).toBe("external");
+    expect(workbenchToolEffect("list_internal_colleagues")?.effect).toBe("read");
+    expect(workbenchToolEffect("ask_internal_colleague")?.effect).toBe("external");
   });
 });

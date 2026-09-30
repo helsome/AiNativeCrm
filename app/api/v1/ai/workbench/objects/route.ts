@@ -4,6 +4,7 @@ import { type NextRequest } from "next/server";
 import { ok, fail } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { rotuloDoContato } from "@/lib/contacts/rotulo-do-contato";
 
 export const dynamic = "force-dynamic";
 const querySchema = z.object({ kind: z.enum(["contact", "lead", "conversation", "pipeline"]), q: z.string().trim().max(100).default("") });
@@ -46,7 +47,7 @@ export async function GET(req: NextRequest): Promise<Response> {
   const items = (data ?? []).map((row) => {
     if (parsed.data.kind === "contact") {
       const item = row as { id: string; name: string | null; display_name: string | null; phone_number: string | null };
-      return { id: item.id, label: item.display_name || item.name || "未命名联系人", detail: item.phone_number ?? null };
+      return { id: item.id, label: rotuloDoContato(item), detail: item.phone_number ?? null };
     }
     if (parsed.data.kind === "lead") {
       const item = row as { id: string; title: string; status: string; pipeline_id: string; contact_id: string | null; value_cents: number | null };

@@ -22,6 +22,7 @@ import { decidirRajada } from './debounce';
 import { avisoDeEventoMorto, IA_QUE_NAO_RESPONDEU } from '@/lib/event-log/aviso-de-evento-morto';
 import { TIPOS_DERIVAVEIS, DERIVACAO_TERMINADA } from '@/lib/messaging/media/derivable';
 import { decidirElegibilidadeDaConversa } from '@/lib/ai/elegibilidade/consulta-pg';
+import { wakeMissionsFromInbound } from '@/lib/ai/agents/mission-wake';
 
 const DRAIN_CONSUMER = 'agent-engine';
 
@@ -301,13 +302,6 @@ async function processEvent(
     [event.organization_id, p.channel_session_id],
   );
   const cap = capacidade[0];
-  if (cap !== undefined && !cap.tem_agente && !cap.tem_roteador) {
-    log.info('drain: nenhum agente publicado para a sessão — turno pulado (sem gasto)', {
-      event_id: event.id,
-      channel_session_id: p.channel_session_id,
-    });
-    return 'processado';
-  }
 
   // ANTI-BACKLOG (toda instalação, sem knob): a mensagem que disparou este
   // evento ainda é a última inbound da conversa? Se já veio inbound mais nova,
@@ -337,6 +331,33 @@ async function processEvent(
       event_id: event.id,
       inbound_message_id: p.inbound_message_id,
       ultima_inbound_id: ultimaInbound[0].id,
+    });
+    return 'processado';
+  }
+
+  // A delegated mission owns the next customer reply on its opportunity.
+  // Claim it before ordinary channel-agent eligibility so one inbound message
+  // cannot launch both a mission continuation and an independent reply turn.
+  if (await wakeMissionsFromInbound(pool, {
+    organizationId: event.organization_id,
+    contactId: p.contact_id,
+    conversationId: p.conversation_id,
+    inboundMessageId: p.inbound_message_id,
+    allowlistTtlMs: knobs.allowlistTtlMs ?? ALLOWLIST_TTL_MS_PADRAO,
+  })) {
+    log.info('drain: customer reply handed to delegated mission', {
+      event_id: event.id,
+      inbound_message_id: p.inbound_message_id,
+    });
+    return 'processado';
+  }
+
+  // A paused channel agent must not spend on ordinary replies, but a delegated
+  // Mission is explicitly owned by its Workbench agent and may still resume.
+  if (cap !== undefined && !cap.tem_agente && !cap.tem_roteador) {
+    log.info('drain: nenhum agente publicado para a sessão — turno pulado (sem gasto)', {
+      event_id: event.id,
+      channel_session_id: p.channel_session_id,
     });
     return 'processado';
   }

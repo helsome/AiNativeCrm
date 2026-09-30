@@ -232,7 +232,7 @@ export const DICIONARIO: Traducoes = {
   "Abordado": { es: "Contactado" },
   "Não abordado": { es: "No contactado" },
   "Respondeu": { es: "Respondió" },
-  // /admin/email — o servidor SMTP da instalação (PR #714, contribuidor, recorte).
+  // /admin/email — o servidor SMTP da instalação (PR #714, @betoarts, recorte).
   "Servidor de e-mail conectado e autenticado.": { es: "Servidor de correo conectado y autenticado." },
   "Preencha e salve o servidor e o remetente antes de testar.": {
     es: "Completa y guarda el servidor y el remitente antes de probar.",
@@ -1009,6 +1009,26 @@ export const DICIONARIO: Traducoes = {
   "Dar contexto ao agente": { es: "Dar contexto al agente", "zh-CN": "Agent 的 CRM 上下文" },
   "Revisar operações": { es: "Revisar operaciones", "zh-CN": "审查 Agent 操作" },
   "Agent–CRM 工作台": { es: "Espacio de trabajo Agent–CRM" },
+  "Resumo da operação, das tarefas e da atividade dos Agents.": {
+    es: "Resumen de la operación, las tareas y la actividad de los agentes.",
+    "zh-CN": "汇总运营、任务与 Agent 活动。",
+  },
+  "Specialist do Agent": {
+    es: "Especialista del agente",
+    "zh-CN": "Agent 专项助手",
+  },
+  "Investiga uma parte da missão com ferramentas de leitura e devolve evidências ao Agent principal.": {
+    es: "Investiga una parte de la misión con herramientas de lectura y devuelve pruebas al agente principal.",
+    "zh-CN": "使用只读工具调查任务的一部分，并将证据交给主 Agent。",
+  },
+  "O specialist herda modelo e credencial do Agent principal da missão; a escolha não é independente.": {
+    es: "El especialista hereda el modelo y la credencial del agente principal de la misión; no se configura por separado.",
+    "zh-CN": "专项助手继承任务主 Agent 的模型和凭据，不能单独配置。",
+  },
+  "A missão continua sem as evidências que o specialist deveria buscar.": {
+    es: "La misión continúa sin las pruebas que debía obtener el especialista.",
+    "zh-CN": "任务缺少专项助手本应取得的证据。",
+  },
   "让 Agent 读取 CRM、提出操作，并审查真实执行过程。": {
     es: "Permite que el agente lea el CRM, proponga acciones y revise su ejecución real.",
   },
@@ -7588,7 +7608,7 @@ export const DICIONARIO: Traducoes = {
 
   // ═══ As telas que só o passe do PR #352 alcançou ═══
   //
-  // Contribuição de contribuidor: as 398 entradas abaixo são as que o
+  // Contribuição de @JowaniOrantes: as 398 entradas abaixo são as que o
   // passe dele cobriu e este PR não tinha — Desempenho, auditoria do tenant,
   // Respostas rápidas, Radar, toasts de hook e as mensagens de erro da API.
   // Onde a mesma chave existia nos dois lados prevalece a tradução deste PR,
@@ -8234,7 +8254,7 @@ export const DICIONARIO: Traducoes = {
 
   // ═══ A Agenda, do PR #379 ═══
   //
-  // Contribuição de contribuidor: as 71 entradas do módulo de Agenda —
+  // Contribuição de @JowaniOrantes: as 71 entradas do módulo de Agenda —
   // grade, marcação, histórico, filtro de pessoas e o cartão da conexão com o
   // Google. Vocabulário herdado dos passes anteriores de propósito:
   // agendamento→cita, atendente→agente, marcar→agendar.
@@ -10248,7 +10268,7 @@ export const DICIONARIO: Traducoes = {
   "Este funil ainda não tem campo de data. Cadastre um em Funis → Campos personalizados para poder escolhê-lo aqui.": {
     es: "Este embudo aún no tiene campo de fecha. Registra uno en Embudos → Campos personalizados para poder elegirlo aquí.",
   },
-  // Do PR #773 (contribuidor): o aria-label do alternador de tema e as frases da
+  // Do PR #773 (@xxjjjj): o aria-label do alternador de tema e as frases da
   // agenda que passaram a sair por t(). As três de "este horário…" são as
   // razões dinâmicas de `razaoDoBloco` — o gate de espanhol não as enxerga.
   "Tema: light. Cmd+Shift+L para alternar.": { es: "Tema: claro. Cmd+Shift+L para cambiar." },
@@ -10739,7 +10759,7 @@ export const DICIONARIO: Traducoes = {
 
   // ─────────────────────────────────────────────────────────────────────────
   // /app/integracao-dados — o banco de dados externo do agente.
-  // Recorte do PR #1130, de contribuidor; o espanhol é o que ele escreveu.
+  // Recorte do PR #1130, de @vgamkt; o espanhol é o que ele escreveu.
   // ─────────────────────────────────────────────────────────────────────────
   "Nenhum banco externo conectado ainda": { es: "Aún no hay ninguna base externa conectada" },
   "Quando o seu outro sistema escreve num PostgreSQL, conecte-o aqui e o agente passa a responder com esses dados — pedido, assinatura, matrícula, saldo.": {

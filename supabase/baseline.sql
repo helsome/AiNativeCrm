@@ -97,8 +97,6 @@ begin
 
   return v_event_id;
 end $$;
-
-
 ALTER FUNCTION "public"."emit_event"("p_event_type" "text", "p_entity_kind" "text", "p_entity_id" "uuid", "p_payload" "jsonb", "p_metadata" "jsonb", "p_organization_id" "uuid") OWNER TO "postgres";
 
 
@@ -7604,7 +7602,7 @@ alter table job_queue add constraint job_queue_kind_check
   -- antigos rodam antes e falham em cadeia. Vigiado por
   -- tests/unit/baseline-constraint-reconstruida.test.ts.
   -- 'transactional_delivery' (0226) segue a mesma consolidação de vocabulário.
-  check (kind in ('inbound_turn','followup_turn','watchdog','flywheel','case_reply_turn','operator_turn','transactional_delivery','approved_reply','workbench_start','workbench_resume'));
+  check (kind in ('inbound_turn','followup_turn','watchdog','flywheel','case_reply_turn','operator_turn','transactional_delivery','approved_reply','workbench_start','workbench_resume','internal_im_event','internal_im_question'));
 alter table job_queue drop constraint if exists job_queue_turn_needs_contact;
 do $$
 declare c text;
@@ -9957,7 +9955,7 @@ alter table public.agent_inbox_items
     -- acontecer. O cron `recover-stuck-messages` marca `failed` e usa este kind
     -- para o defeito APARECER na Central de avisos.
     --
-    -- Entra NESTA lista, e não num bloco novo no fim do arquivo: o #159 do contribuidor
+    -- Entra NESTA lista, e não num bloco novo no fim do arquivo: o #159 do @jmpo
     -- mostrou que reconstruir a mesma constraint em N blocos quebra o
     -- `update.sh` de todo clone que já tenha uma linha de vocabulário posterior
     -- — os blocos antigos rodam antes e falham em cadeia. Um bloco por
@@ -10146,7 +10144,7 @@ grant execute on function public.fn_user_role_in(uuid) to authenticated, service
 grant execute on function public.fn_role_at_least(uuid, text) to authenticated, service_role;
 
 -- ---- ai_invocations.agent_id aceita NULL (migration 0114) ----
--- Issue #160 (contribuidor, medindo a própria VPS): o classificador de sentimento roda
+-- Issue #160 (@jmpo, medindo a própria VPS): o classificador de sentimento roda
 -- mesmo sem agente ativo — lê o agente só para o threshold e cai no default —
 -- mas auditava com `agent_id: agent?.id ?? ""` numa coluna `uuid NOT NULL`. O
 -- insert é fire-and-forget, então o erro só aparecia como `warn` no log do
@@ -25050,7 +25048,7 @@ notify pgrst, 'reload schema';
 --
 -- Derivado de supabase/migrations/20260915180000_0262_cliente_pela_agenda.sql (a
 -- partir da seção 1; o porquê inteiro está no cabeçalho de lá). Contribuição de
--- contribuidor (PR #867), com os ajustes da decisão do dono: regra desligada por
+-- @423313 (PR #867), com os ajustes da decisão do dono: regra desligada por
 -- organização, cancelado/falta não contam, a etiqueta tem dono (o sistema só
 -- tira a que pôs e só repõe a que tirou), e contact.tag_added sai uma vez por
 -- contato. A seção 7 redefine `fn_mesclar_contatos` para pegar a trava da
@@ -34299,7 +34297,7 @@ $$;
 -- limite (docs/runbooks/postgrest-replay-do-gateway.md); `PTxxx` chega como o
 -- status dos três últimos dígitos, e 4xx não é reexecutado. Corpo idêntico ao
 -- da definição acima, com três `errcode` trocados. Idempotente.
--- Recorte do PR #803, de contribuidor.
+-- Recorte do PR #803, de @paulolimajr77.
 
 create or replace function public.fn_meet_action(p_org uuid,p_id uuid,p_revision text,p_request uuid,p_action text,p_conversation uuid default null)
 returns boolean language plpgsql security definer set search_path=public as $$
@@ -34354,7 +34352,7 @@ end;$$;
 -- do envio ampliado. Idempotente.
 -- ⚠️ ENTRA ANTES DO BLOCO DA VARREDURA anon: ela cura só o que veio antes, e
 -- função criada depois nasce exposta a `anon` e fica.
--- Recorte do PR #803, de contribuidor.
+-- Recorte do PR #803, de @paulolimajr77.
 
 create or replace function public.fn_meet_action(p_org uuid,p_id uuid,p_revision text,p_request uuid,p_action text,p_conversation uuid default null)
 returns boolean language plpgsql security definer set search_path=public as $$
@@ -34412,7 +34410,7 @@ end;$$;
 -- A exigência de link pronto passa a valer SÓ onde `location_kind='google_meet'`
 -- nas TRÊS pontas: o gatilho que enfileira, o porteiro do envio e a ação que
 -- autoriza. Nada mais muda. ⚠️ ANTES DA VARREDURA anon. Idempotente.
--- Recorte do PR #803, de contribuidor.
+-- Recorte do PR #803, de @paulolimajr77.
 
 create or replace function public.fn_meet_delivery_current(p_org uuid,p_job uuid,p_worker text,p_acquired_at timestamptz)
 returns boolean language sql stable security definer set search_path=public as $$
@@ -34511,7 +34509,7 @@ begin
  -- então o cliente não receberia nada — mas o job nasceria para morrer
  -- bloqueado, e a tela mostraria uma entrega a caminho que nunca sai.
  --
- -- Achado do contribuidor, e foi o teste DELE que o pegou aqui.
+ -- Achado do @paulolimajr77, e foi o teste DELE que o pegou aqui.
  if new.status='cancelled' or new.meeting_state='cancelled' or new.meeting_delivery->>'state' in ('blocked','stale') then
   update public.job_queue set status='failed',locked_at=null,locked_by=null,payload='{}',last_error='meet_delivery_stale'
    where organization_id=new.organization_id and id=new.meeting_delivery_job_id and kind='transactional_delivery' and status in ('pending','running');
@@ -35260,7 +35258,7 @@ notify pgrst, 'reload schema';
 -- mesma pessoa, com espera de 2 min (`nao_antes_de`) para arrastar na grade não
 -- virar uma mensagem por arrasto. O enfileirador carrega o `motivo` ao payload.
 -- ⚠️ ANTES DA VARREDURA anon. Idempotente.
--- Recorte do PR #803, de contribuidor.
+-- Recorte do PR #803, de @paulolimajr77.
 
 create or replace function public.fn_remarcar_corrige_o_envio()
 returns trigger language plpgsql security definer set search_path=public as $$
@@ -35326,7 +35324,7 @@ begin
  -- então o cliente não receberia nada — mas o job nasceria para morrer
  -- bloqueado, e a tela mostraria uma entrega a caminho que nunca sai.
  --
- -- Achado do contribuidor, e foi o teste DELE que o pegou aqui.
+ -- Achado do @paulolimajr77, e foi o teste DELE que o pegou aqui.
  if new.status='cancelled' or new.meeting_state='cancelled' or new.meeting_delivery->>'state' in ('blocked','stale') then
   update public.job_queue set status='failed',locked_at=null,locked_by=null,payload='{}',last_error='meet_delivery_stale'
    where organization_id=new.organization_id and id=new.meeting_delivery_job_id and kind='transactional_delivery' and status in ('pending','running');
@@ -35855,7 +35853,7 @@ update storage.buckets
 set allowed_mime_types = array['application/pdf', 'text/markdown', 'text/x-markdown', 'text/plain', 'text/csv']
 where id = 'ai-policy';
 -- ---- o recibo de idempotência ganha o estado "em curso" (migration 0321) ----
--- Issue #778, PR #1189 (contribuidor). Reserva = `status_code` e `response_body`
+-- Issue #778, PR #1189 (@webtecnica). Reserva = `status_code` e `response_body`
 -- nulos, gravada ANTES do efeito; recibo = os dois preenchidos. O `create table`
 -- do corpo já nasce anulável (install); as duas primeiras linhas levam a
 -- nulidade a quem JÁ tinha a tabela (update), onde o `create table if not
@@ -35882,7 +35880,7 @@ comment on column public.platform_settings.internal_destinations is
 notify pgrst, 'reload schema';
 
 -- ---- marcador do contato normalizado, no dado que já estava gravado (migration 0335) ----
--- Issue #1224 (triagem do #1206), contribuidor. A escrita passou a normalizar o
+-- Issue #1224 (triagem do #1206), @webtecnica. A escrita passou a normalizar o
 -- marcador do contato nos quatro caminhos (ficha, importação por CSV, API e
 -- `crm_manage_tags`) pela MESMA função que o filtro usa para ler
 -- (lib/contacts/tag-normalizada.ts) — sem isso, `?tag=vip` não encontra o contato
@@ -35935,7 +35933,7 @@ notify pgrst, 'reload schema';
 
 -- ---- banco de dados externo do agente (migrations 0372 e 0373) ----
 --
--- Recorte do PR #1130, de contribuidor. O cadastro da conexão da organização com um
+-- Recorte do PR #1130, de @vgamkt. O cadastro da conexão da organização com um
 -- PostgreSQL de OUTRO sistema (segundo CRM, ERP), que o agente consulta em
 -- tempo real. A senha é cifrada pelo app (AES-256-GCM, `AI_CRED_AES_KEY`) e
 -- nunca tem coluna em claro; a tela lê a view `_safe`, que omite as três
@@ -36590,6 +36588,772 @@ grant execute on function public.fn_claim_ai_specialist_run(uuid,uuid,uuid,uuid,
 comment on column public.ai_workbench_runs.execution_attempt_id is 'Fencing token for the latest durable specialist execution attempt.';
 comment on column public.ai_workbench_runs.execution_lease_expires_at is 'After this instant another worker may atomically reclaim the specialist run.';
 comment on function public.fn_claim_ai_specialist_run(uuid,uuid,uuid,uuid,integer) is 'Atomically claims a queued/retryable or lease-expired specialist and returns its fencing token.';
+
+-- 0386 — durable business mission above individual workbench runs.
+create unique index if not exists crm_leads_organization_id_id_for_missions_uidx
+  on public.crm_leads (organization_id, id);
+create table if not exists public.ai_missions (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  lead_id uuid not null,
+  actor_user_id uuid references auth.users(id) on delete set null,
+  goal text not null check (char_length(goal) between 1 and 8000),
+  acceptance_criteria text not null check (char_length(acceptance_criteria) between 1 and 4000),
+  status text not null default 'queued' check (status in (
+    'queued', 'running', 'waiting_approval', 'waiting_internal',
+    'waiting_customer', 'needs_review', 'completed', 'cancelled'
+  )),
+  blocked_reason text,
+  wake_on_customer_reply boolean not null default false,
+  max_runs integer not null default 4 check (max_runs between 1 and 10),
+  deadline_at timestamptz,
+  completed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint ai_missions_lead_same_org_fkey foreign key (organization_id, lead_id)
+    references public.crm_leads(organization_id, id) on delete restrict,
+  constraint ai_missions_id_org_unique unique (id, organization_id)
+);
+create index if not exists ai_missions_org_lead_status_idx
+  on public.ai_missions (organization_id, lead_id, status, created_at desc);
+create unique index if not exists ai_missions_one_active_per_lead_uidx
+  on public.ai_missions (organization_id, lead_id)
+  where status not in ('completed', 'cancelled');
+create index if not exists ai_missions_due_idx
+  on public.ai_missions (deadline_at)
+  where deadline_at is not null and status not in ('completed', 'cancelled');
+alter table public.ai_missions enable row level security;
+drop policy if exists tenant_isolation_ai_missions_select on public.ai_missions;
+create policy tenant_isolation_ai_missions_select on public.ai_missions
+  for select using (
+    organization_id in (select * from public.fn_user_org_ids())
+    and public.fn_role_at_least(organization_id, 'manager')
+  );
+revoke all on public.ai_missions from public, anon, authenticated;
+grant select on public.ai_missions to authenticated;
+grant all on public.ai_missions to service_role;
+alter table public.ai_workbench_runs add column if not exists mission_id uuid;
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.ai_workbench_runs'::regclass
+      and conname = 'ai_workbench_runs_mission_same_org_fkey'
+  ) then
+    alter table public.ai_workbench_runs
+      add constraint ai_workbench_runs_mission_same_org_fkey
+      foreign key (mission_id, organization_id)
+      references public.ai_missions(id, organization_id) on delete restrict;
+  end if;
+end $$;
+alter table public.ai_workbench_runs
+  drop constraint if exists ai_workbench_runs_mission_root_only_check;
+alter table public.ai_workbench_runs
+  add constraint ai_workbench_runs_mission_root_only_check
+  check (mission_id is null or run_kind = 'root');
+create index if not exists ai_workbench_runs_mission_history_idx
+  on public.ai_workbench_runs (organization_id, mission_id, created_at desc)
+  where mission_id is not null;
+create table if not exists public.ai_mission_wakes (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  mission_id uuid not null,
+  inbound_message_id uuid not null,
+  run_id uuid not null,
+  created_at timestamptz not null default now(),
+  constraint ai_mission_wakes_mission_same_org_fkey foreign key (mission_id, organization_id)
+    references public.ai_missions(id, organization_id) on delete cascade,
+  constraint ai_mission_wakes_run_same_org_fkey foreign key (run_id, organization_id)
+    references public.ai_workbench_runs(id, organization_id) on delete cascade,
+  constraint ai_mission_wakes_source_unique unique (mission_id, inbound_message_id)
+);
+alter table public.ai_mission_wakes enable row level security;
+revoke all on public.ai_mission_wakes from public, anon, authenticated;
+grant all on public.ai_mission_wakes to service_role;
+create or replace function public.fn_sync_ai_mission_from_run()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if new.mission_id is null or new.run_kind <> 'root' then return new; end if;
+  if tg_op = 'UPDATE' then
+    if old.status = new.status then return new; end if;
+  end if;
+  update public.ai_missions as m
+  set status = case new.status
+        when 'queued' then 'queued'
+        when 'running' then 'running'
+        when 'awaiting_confirmation' then 'waiting_approval'
+        else 'needs_review'
+      end,
+      blocked_reason = case new.status
+        when 'awaiting_confirmation' then 'action_approval_required'
+        when 'partial' then coalesce(new.error_code, 'run_partial')
+        when 'failed' then coalesce(new.error_code, 'run_failed')
+        when 'cancelled' then 'run_cancelled'
+        when 'completed' then 'business_outcome_unverified'
+        else null
+      end
+  where m.id = new.mission_id
+    and m.organization_id = new.organization_id
+    and m.status not in ('completed', 'cancelled');
+  return new;
+end;
+$$;
+revoke all on function public.fn_sync_ai_mission_from_run() from public, anon, authenticated;
+drop trigger if exists trg_sync_ai_mission_from_run on public.ai_workbench_runs;
+create trigger trg_sync_ai_mission_from_run
+  after insert or update of status on public.ai_workbench_runs
+  for each row execute function public.fn_sync_ai_mission_from_run();
+drop trigger if exists trg_ai_missions_updated_at on public.ai_missions;
+create trigger trg_ai_missions_updated_at before update on public.ai_missions
+  for each row execute function public.fn_set_updated_at();
+notify pgrst, 'reload schema';
+
+-- 0387 — human resolution evidence and append-only mission transitions.
+alter table public.ai_missions
+  add column if not exists resolution_reason text,
+  add column if not exists resolved_by_user_id uuid references auth.users(id) on delete set null;
+create table if not exists public.ai_mission_events (
+  id bigint generated always as identity primary key,
+  organization_id uuid not null,
+  mission_id uuid not null,
+  event_type text not null check (event_type in ('created', 'state_changed')),
+  from_status text,
+  to_status text not null,
+  created_at timestamptz not null default now(),
+  constraint ai_mission_events_mission_same_org_fkey
+    foreign key (mission_id, organization_id)
+    references public.ai_missions(id, organization_id) on delete cascade
+);
+create index if not exists ai_mission_events_replay_idx
+  on public.ai_mission_events (organization_id, mission_id, id);
+create unique index if not exists ai_mission_events_one_creation_uidx
+  on public.ai_mission_events (mission_id) where event_type='created';
+alter table public.ai_mission_events enable row level security;
+drop policy if exists tenant_isolation_ai_mission_events_select on public.ai_mission_events;
+create policy tenant_isolation_ai_mission_events_select on public.ai_mission_events
+  for select using (
+    organization_id in (select * from public.fn_user_org_ids())
+    and public.fn_role_at_least(organization_id, 'manager')
+  );
+revoke all on public.ai_mission_events from public, anon, authenticated;
+grant select on public.ai_mission_events to authenticated;
+grant all on public.ai_mission_events to service_role;
+create or replace function public.fn_record_ai_mission_transition()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if tg_op = 'UPDATE' then
+    if old.status = new.status then return new; end if;
+  end if;
+  insert into public.ai_mission_events
+    (organization_id, mission_id, event_type, from_status, to_status)
+  values (
+    new.organization_id,
+    new.id,
+    case when tg_op = 'INSERT' then 'created' else 'state_changed' end,
+    case when tg_op = 'INSERT' then null else old.status end,
+    new.status
+  );
+  return new;
+end;
+$$;
+revoke all on function public.fn_record_ai_mission_transition() from public, anon, authenticated;
+drop trigger if exists trg_record_ai_mission_transition on public.ai_missions;
+create trigger trg_record_ai_mission_transition
+  after insert or update of status on public.ai_missions
+  for each row execute function public.fn_record_ai_mission_transition();
+insert into public.ai_mission_events
+  (organization_id, mission_id, event_type, from_status, to_status, created_at)
+select m.organization_id, m.id, 'created', null, m.status, m.created_at
+from public.ai_missions m
+where not exists (
+  select 1 from public.ai_mission_events e
+  where e.mission_id=m.id and e.event_type='created'
+)
+on conflict do nothing;
+notify pgrst, 'reload schema';
+
+-- 0388 — cumulative Mission model budget across root and specialist Runs.
+alter table public.ai_missions
+  add column if not exists max_total_tokens integer not null default 72000
+    check (max_total_tokens between 1000 and 1000000),
+  add column if not exists max_total_cost_cents numeric(12,4) not null default 200
+    check (max_total_cost_cents > 0 and max_total_cost_cents <= 100000);
+notify pgrst, 'reload schema';
+
+-- 0389 — Mission cancellation fences Pi writes and approved customer delivery.
+create or replace function public.fn_cancel_ai_mission(
+  p_org uuid, p_mission uuid, p_actor uuid, p_reason text
+)
+returns text
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_status text;
+  v_run record;
+  v_attempt integer;
+begin
+  select status into v_status
+  from public.ai_missions
+  where organization_id = p_org and id = p_mission
+  for update;
+  if not found then return 'not_found'; end if;
+  if v_status in ('completed', 'cancelled') then return 'terminal'; end if;
+  update public.ai_missions set
+    status = 'cancelled', blocked_reason = left(p_reason, 2000),
+    wake_on_customer_reply = false, completed_at = now(),
+    resolution_reason = left(p_reason, 2000), resolved_by_user_id = p_actor
+  where organization_id = p_org and id = p_mission;
+  update public.ai_reply_drafts d set
+    status = 'stale', error_code = 'mission_cancelled', updated_at = now()
+  where d.organization_id = p_org and d.status = 'pending'
+    and d.workbench_run_id in (
+      select id from public.ai_workbench_runs
+      where organization_id = p_org and mission_id = p_mission
+    );
+  update public.ai_agent_action_proposals p set status = 'cancelled'
+  where p.organization_id = p_org and p.status = 'pending'
+    and p.run_id in (
+      select id from public.ai_workbench_runs
+      where organization_id = p_org and mission_id = p_mission
+    );
+  for v_run in
+    update public.ai_workbench_runs r set
+      status = 'cancelled', completed_at = now(),
+      error_code = 'mission_cancelled'
+    where r.organization_id = p_org
+      and r.status in ('queued', 'running', 'awaiting_confirmation')
+      and (
+        r.mission_id = p_mission or r.parent_run_id in (
+          select id from public.ai_workbench_runs
+          where organization_id = p_org and mission_id = p_mission
+        )
+      )
+    returning r.id
+  loop
+    for v_attempt in 1..8 loop
+      begin
+        insert into public.ai_agent_run_events
+          (organization_id, run_id, sequence, event_type, payload)
+        select p_org, v_run.id, coalesce(max(sequence), 0) + 1,
+               'run_cancelled', jsonb_build_object('actorUserId', p_actor)
+        from public.ai_agent_run_events
+        where organization_id = p_org and run_id = v_run.id;
+        exit;
+      exception when unique_violation then
+        if v_attempt = 8 then raise; end if;
+      end;
+    end loop;
+  end loop;
+  return 'cancelled';
+end;
+$$;
+revoke all on function public.fn_cancel_ai_mission(uuid,uuid,uuid,text)
+  from public, anon, authenticated;
+grant execute on function public.fn_cancel_ai_mission(uuid,uuid,uuid,text)
+  to service_role;
+
+create or replace function public.fn_reply_context_current(p_org uuid,p_id uuid)
+returns boolean language sql stable security definer set search_path=public as $$
+  select exists(
+    select 1 from public.ai_reply_drafts d
+    join public.conversations c on c.organization_id=d.organization_id and c.id=d.conversation_id and c.contact_id=d.contact_id
+    join public.ai_agents a on a.organization_id=d.organization_id and a.id=d.agent_id
+    join public.contacts p on p.organization_id=d.organization_id and p.id=d.contact_id
+    join public.channel_sessions s on s.organization_id=d.organization_id and s.id=d.channel_session_id
+    where d.organization_id=p_org and d.id=p_id
+      and c.reply_context_revision=d.context_revision and a.operation_revision=d.operation_revision
+      and a.archived_at is null and c.channel_session_id=d.channel_session_id and s.archived_at is null
+      and not p.is_blocked and not p.is_anonymized and public.fn_meet_boundary_current(d.service_boundary)
+      and (
+        (d.workbench_run_id is null and a.published_version_id=d.agent_version_id)
+        or (
+          d.workbench_run_id is not null and d.workbench_proposal_id is not null
+          and exists (
+            select 1 from public.ai_workbench_runs r
+            join public.ai_agent_action_proposals proposal
+              on proposal.organization_id=r.organization_id and proposal.run_id=r.id
+            where r.organization_id=d.organization_id and r.id=d.workbench_run_id
+              and r.agent_id=d.agent_id and r.mode='act'
+              and r.scope->>'conversationId'=d.conversation_id::text
+              and r.status in ('awaiting_confirmation','running','completed','partial','failed')
+              and (
+                r.mission_id is null or exists (
+                  select 1 from public.ai_missions m
+                  where m.organization_id=r.organization_id and m.id=r.mission_id
+                    and m.status not in ('cancelled','completed')
+                    and a.is_active and a.paused_at is null
+                    and a.operation_mode='automatic'
+                )
+              )
+              and proposal.id=d.workbench_proposal_id and proposal.tool_name='send_message'
+              and proposal.tool_args->>'body'=d.original_body
+              and (
+                (proposal.status='pending' and d.status='pending')
+                or (proposal.status='executed' and d.status in ('approved','sending','sent'))
+              )
+          )
+        )
+      )
+  );
+$$;
+revoke all on function public.fn_reply_context_current(uuid,uuid)
+  from public, anon, authenticated;
+grant execute on function public.fn_reply_context_current(uuid,uuid)
+  to service_role;
+notify pgrst, 'reload schema';
+
+-- 0390 — bounded model statement, not verified business outcome.
+alter table public.ai_workbench_runs
+  add column if not exists result_document jsonb;
+alter table public.ai_workbench_runs
+  drop constraint if exists ai_workbench_runs_result_document_shape_check;
+alter table public.ai_workbench_runs
+  add constraint ai_workbench_runs_result_document_shape_check
+  check (result_document is null or coalesce((
+    jsonb_typeof(result_document) = 'object'
+    and result_document->>'revision' = '1'
+    and result_document->>'trust' = 'model_submitted'
+    and jsonb_typeof(result_document->'summary') = 'string'
+    and jsonb_typeof(result_document->'evidence') = 'array'
+    and jsonb_typeof(result_document->'missingInformation') = 'array'
+    and jsonb_typeof(result_document->'nextStep') = 'string'
+    and result_document->>'wakeCondition' in
+      ('none', 'customer_reply', 'human_approval', 'internal_response', 'deadline')
+  ), false));
+comment on column public.ai_workbench_runs.result_document is
+  'Bounded model-submitted result, not independent proof of business outcome or action execution.';
+notify pgrst, 'reload schema';
+
+-- 0391 — Internal facts wake a Mission but never authorize an external action.
+-- Keep only the digest here; the manager-scoped Run task owns the free text.
+create unique index if not exists ai_workbench_runs_org_mission_run_uidx
+  on public.ai_workbench_runs (organization_id, mission_id, id);
+create table if not exists public.ai_mission_internal_inputs (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  mission_id uuid not null,
+  request_key uuid not null,
+  actor_user_id uuid references auth.users(id) on delete set null,
+  run_id uuid not null,
+  content_digest text not null check (content_digest ~ '^[a-f0-9]{64}$'),
+  created_at timestamptz not null default now(),
+  constraint ai_mission_internal_inputs_mission_same_org_fkey
+    foreign key (mission_id, organization_id)
+    references public.ai_missions(id, organization_id) on delete cascade,
+  constraint ai_mission_internal_inputs_run_same_org_fkey
+    foreign key (organization_id, mission_id, run_id)
+    references public.ai_workbench_runs(organization_id, mission_id, id) on delete cascade,
+  constraint ai_mission_internal_inputs_request_unique
+    unique (organization_id, mission_id, request_key),
+  constraint ai_mission_internal_inputs_run_unique unique (run_id)
+);
+alter table public.ai_mission_internal_inputs enable row level security;
+revoke all on public.ai_mission_internal_inputs from public, anon, authenticated;
+grant all on public.ai_mission_internal_inputs to service_role;
+notify pgrst, 'reload schema';
+
+-- 0392 — Feishu employee input identities and reply-thread bindings.
+create table if not exists public.ai_internal_platform_tenants (
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  provider text not null check (provider = 'feishu'),
+  tenant_key text not null check (char_length(tenant_key) between 1 and 256),
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  primary key (provider, tenant_key),
+  unique (organization_id, provider, tenant_key)
+);
+create table if not exists public.ai_internal_platform_users (
+  organization_id uuid not null,
+  provider text not null check (provider = 'feishu'),
+  tenant_key text not null,
+  external_user_id text not null check (char_length(external_user_id) between 1 and 256),
+  user_id uuid not null,
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  primary key (provider, tenant_key, external_user_id),
+  unique (organization_id, provider, tenant_key, external_user_id),
+  foreign key (organization_id, provider, tenant_key)
+    references public.ai_internal_platform_tenants(organization_id, provider, tenant_key)
+    on delete cascade,
+  foreign key (user_id, organization_id)
+    references public.user_organizations(user_id, organization_id) on delete cascade
+);
+create table if not exists public.ai_mission_internal_threads (
+  organization_id uuid not null,
+  mission_id uuid not null,
+  provider text not null check (provider = 'feishu'),
+  tenant_key text not null,
+  chat_id text not null check (char_length(chat_id) between 1 and 256),
+  root_message_id text not null check (char_length(root_message_id) between 1 and 256),
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  primary key (provider, tenant_key, chat_id, root_message_id),
+  foreign key (organization_id, provider, tenant_key)
+    references public.ai_internal_platform_tenants(organization_id, provider, tenant_key)
+    on delete cascade,
+  foreign key (mission_id, organization_id)
+    references public.ai_missions(id, organization_id) on delete cascade
+);
+create index if not exists ai_mission_internal_threads_mission_idx
+  on public.ai_mission_internal_threads(organization_id, mission_id);
+alter table public.ai_mission_internal_inputs
+  add column if not exists source_provider text,
+  add column if not exists source_tenant_key text,
+  add column if not exists source_event_id text;
+alter table public.ai_mission_internal_inputs
+  drop constraint if exists ai_mission_internal_inputs_source_shape;
+alter table public.ai_mission_internal_inputs
+  add constraint ai_mission_internal_inputs_source_shape check (
+    (source_provider is null and source_tenant_key is null and source_event_id is null)
+    or (source_provider = 'feishu'
+      and char_length(source_tenant_key) between 1 and 256
+      and char_length(source_event_id) between 1 and 256)
+  );
+create unique index if not exists ai_mission_internal_inputs_source_uidx
+  on public.ai_mission_internal_inputs(source_provider, source_tenant_key, source_event_id)
+  where source_provider is not null;
+alter table public.ai_internal_platform_tenants enable row level security;
+alter table public.ai_internal_platform_users enable row level security;
+alter table public.ai_mission_internal_threads enable row level security;
+revoke all on public.ai_internal_platform_tenants,
+  public.ai_internal_platform_users, public.ai_mission_internal_threads
+  from public, anon, authenticated;
+grant all on public.ai_internal_platform_tenants,
+  public.ai_internal_platform_users, public.ai_mission_internal_threads
+  to service_role;
+notify pgrst, 'reload schema';
+
+-- 0393 — encrypted internal IM inbox; worker continues the Mission later.
+create table if not exists public.ai_internal_event_inbox (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  mission_id uuid not null,
+  provider text not null check (provider='feishu'),
+  tenant_key text not null check (char_length(tenant_key) between 1 and 256),
+  event_id text not null check (char_length(event_id) between 1 and 256),
+  event_digest text not null check (event_digest ~ '^[a-f0-9]{64}$'),
+  external_user_id text not null check (char_length(external_user_id) between 1 and 256),
+  chat_id text not null check (char_length(chat_id) between 1 and 256),
+  root_message_id text not null check (char_length(root_message_id) between 1 and 256),
+  message_id text not null check (char_length(message_id) between 1 and 256),
+  content_ciphertext bytea,
+  content_iv bytea,
+  content_tag bytea,
+  status text not null default 'pending'
+    check (status in ('pending','processed','needs_review','expired')),
+  processed_run_id uuid,
+  failure_code text check (failure_code is null or char_length(failure_code) <= 64),
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null default (now() + interval '7 days'),
+  processed_at timestamptz,
+  unique (provider, tenant_key, event_id),
+  foreign key (mission_id, organization_id)
+    references public.ai_missions(id, organization_id) on delete cascade,
+  foreign key (organization_id, mission_id, processed_run_id)
+    references public.ai_workbench_runs(organization_id, mission_id, id) on delete cascade,
+  check (
+    (content_ciphertext is null and content_iv is null and content_tag is null)
+    or (content_ciphertext is not null and octet_length(content_iv)=12
+      and octet_length(content_tag)=16)
+  ),
+  check (status <> 'pending' or content_ciphertext is not null),
+  check (status <> 'processed' or processed_run_id is not null)
+);
+create index if not exists ai_internal_event_inbox_due_idx
+  on public.ai_internal_event_inbox(expires_at)
+  where content_ciphertext is not null;
+alter table public.ai_internal_event_inbox enable row level security;
+revoke all on public.ai_internal_event_inbox from public, anon, authenticated;
+grant all on public.ai_internal_event_inbox to service_role;
+notify pgrst, 'reload schema';
+
+-- 0394 — durable encrypted Feishu question outbox.
+create table if not exists public.ai_internal_question_outbox (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  mission_id uuid not null,
+  requester_user_id uuid not null,
+  recipient_user_id uuid not null,
+  provider text not null default 'feishu' check (provider='feishu'),
+  tenant_key text not null check (char_length(tenant_key) between 1 and 256),
+  recipient_open_id text not null check (char_length(recipient_open_id) between 1 and 256),
+  request_key uuid not null,
+  question_digest text not null check (question_digest ~ '^[a-f0-9]{64}$'),
+  question_ciphertext bytea,
+  question_iv bytea,
+  question_tag bytea,
+  status text not null default 'pending'
+    check (status in ('pending','sent','needs_review','expired')),
+  message_id text check (message_id is null or char_length(message_id) between 1 and 256),
+  chat_id text check (chat_id is null or char_length(chat_id) between 1 and 256),
+  failure_code text check (failure_code is null or char_length(failure_code) <= 64),
+  created_at timestamptz not null default now(),
+  send_deadline_at timestamptz not null default (now() + interval '45 minutes'),
+  payload_expires_at timestamptz not null default (now() + interval '7 days'),
+  sent_at timestamptz,
+  unique (organization_id, mission_id, request_key),
+  unique (provider, tenant_key, message_id),
+  foreign key (mission_id, organization_id)
+    references public.ai_missions(id, organization_id) on delete cascade,
+  foreign key (requester_user_id, organization_id)
+    references public.user_organizations(user_id, organization_id),
+  foreign key (recipient_user_id, organization_id)
+    references public.user_organizations(user_id, organization_id),
+  foreign key (organization_id, provider, tenant_key)
+    references public.ai_internal_platform_tenants(organization_id, provider, tenant_key),
+  check (
+    (question_ciphertext is null and question_iv is null and question_tag is null)
+    or (question_ciphertext is not null and octet_length(question_iv)=12
+      and octet_length(question_tag)=16)
+  ),
+  check (status <> 'pending' or question_ciphertext is not null),
+  check (status <> 'sent' or (message_id is not null and chat_id is not null and sent_at is not null))
+);
+create index if not exists ai_internal_question_outbox_due_idx
+  on public.ai_internal_question_outbox(payload_expires_at)
+  where question_ciphertext is not null;
+alter table public.ai_internal_question_outbox enable row level security;
+revoke all on public.ai_internal_question_outbox from public, anon, authenticated;
+grant all on public.ai_internal_question_outbox to service_role;
+notify pgrst, 'reload schema';
+
+-- 0395 — optional, versioned observable Mission conditions.
+alter table public.ai_missions add column if not exists acceptance_contract jsonb;
+create or replace function public.fn_valid_ai_mission_acceptance_contract(p jsonb)
+returns boolean
+language plpgsql immutable
+set search_path = public
+as $$
+declare
+  item jsonb;
+  seen text[] := '{}';
+  kind text;
+begin
+  if p is null then return true; end if;
+  if jsonb_typeof(p) is distinct from 'object' then return false; end if;
+  if p->'revision' is distinct from '1'::jsonb
+     or (select count(*) from jsonb_object_keys(p)) <> 2
+     or jsonb_typeof(p->'checks') is distinct from 'array' then return false; end if;
+  if jsonb_array_length(p->'checks') not between 1 and 2 then return false; end if;
+  for item in select value from jsonb_array_elements(p->'checks') loop
+    if jsonb_typeof(item) is distinct from 'object' then return false; end if;
+    kind := item->>'kind';
+    if kind = any(seen) then return false; end if;
+    if kind = 'lead_status' then
+      if item->>'equals' is null or item->>'equals' not in ('open', 'won', 'lost')
+         or (select count(*) from jsonb_object_keys(item)) <> 2 then return false; end if;
+    elsif kind = 'customer_inbound_after_verified_send' then
+      if (select count(*) from jsonb_object_keys(item)) <> 1 then return false; end if;
+    else
+      return false;
+    end if;
+    seen := array_append(seen, kind);
+  end loop;
+  return true;
+end;
+$$;
+revoke all on function public.fn_valid_ai_mission_acceptance_contract(jsonb) from public, anon, authenticated;
+grant execute on function public.fn_valid_ai_mission_acceptance_contract(jsonb) to service_role;
+alter table public.ai_missions drop constraint if exists ai_missions_acceptance_contract_shape_check;
+alter table public.ai_missions add constraint ai_missions_acceptance_contract_shape_check
+  check (public.fn_valid_ai_mission_acceptance_contract(acceptance_contract));
+comment on column public.ai_missions.acceptance_contract is
+  'Optional revisioned observable checks; matching them does not prove free-text business acceptance.';
+notify pgrst, 'reload schema';
+
+-- 0396 — durable manager command and final customer-send policy.
+alter table public.ai_missions
+  add column if not exists customer_send_paused boolean not null default false,
+  add column if not exists customer_send_paused_at timestamptz,
+  add column if not exists send_policy_revision bigint not null default 0;
+create table if not exists public.ai_mission_commands (
+  id bigint generated always as identity primary key,
+  organization_id uuid not null,
+  mission_id uuid not null,
+  actor_user_id uuid not null,
+  request_key uuid not null,
+  kind text not null check (kind in ('pause_customer_send','resume_customer_send')),
+  reason text not null check (char_length(reason) between 5 and 2000),
+  changed boolean not null,
+  paused_after boolean not null,
+  policy_revision bigint not null,
+  created_at timestamptz not null default now(),
+  unique (organization_id, mission_id, request_key),
+  foreign key (mission_id, organization_id)
+    references public.ai_missions(id, organization_id) on delete cascade,
+  foreign key (actor_user_id, organization_id)
+    references public.user_organizations(user_id, organization_id)
+);
+create index if not exists ai_mission_commands_replay_idx
+  on public.ai_mission_commands (organization_id, mission_id, id);
+alter table public.ai_mission_commands enable row level security;
+revoke all on public.ai_mission_commands from public, anon, authenticated;
+revoke all on public.ai_mission_commands from service_role;
+grant select on public.ai_mission_commands to service_role;
+create or replace function public.fn_set_ai_mission_send_policy(
+  p_org uuid, p_mission uuid, p_actor uuid, p_request_key uuid,
+  p_kind text, p_reason text
+)
+returns jsonb
+language plpgsql security definer set search_path=public
+as $$
+declare
+  v_mission public.ai_missions;
+  v_prior public.ai_mission_commands;
+  v_paused boolean;
+  v_changed boolean;
+  v_contact uuid;
+begin
+  if p_org is null or p_mission is null or p_actor is null or p_request_key is null
+     or p_kind is null or p_kind not in ('pause_customer_send','resume_customer_send')
+     or p_reason is null or char_length(p_reason) not between 5 and 2000 then
+    return jsonb_build_object('result','invalid_request');
+  end if;
+  if not exists (
+    select 1 from public.user_organizations u
+    where u.organization_id=p_org and u.user_id=p_actor
+      and u.revoked_at is null and u.role in ('manager','admin')
+  ) then return jsonb_build_object('result','unauthorized'); end if;
+  select l.contact_id into v_contact
+  from public.ai_missions m
+  join public.crm_leads l on l.organization_id=m.organization_id and l.id=m.lead_id
+  where m.organization_id=p_org and m.id=p_mission;
+  if v_contact is not null then perform public.fn_service_lock(p_org,v_contact); end if;
+  select * into v_mission from public.ai_missions
+  where organization_id=p_org and id=p_mission for update;
+  if not found then return jsonb_build_object('result','not_found'); end if;
+  select * into v_prior from public.ai_mission_commands
+  where organization_id=p_org and mission_id=p_mission and request_key=p_request_key;
+  if found then
+    if v_prior.kind is distinct from p_kind or v_prior.reason is distinct from p_reason
+       or v_prior.actor_user_id is distinct from p_actor then
+      return jsonb_build_object('result','source_conflict');
+    end if;
+    return jsonb_build_object('result','replayed','paused',v_mission.customer_send_paused,
+      'revision',v_mission.send_policy_revision,'commandId',v_prior.id);
+  end if;
+  if v_mission.status in ('completed','cancelled') then
+    return jsonb_build_object('result','terminal');
+  end if;
+  v_paused := p_kind='pause_customer_send';
+  v_changed := v_mission.customer_send_paused is distinct from v_paused;
+  if v_changed then
+    update public.ai_missions set customer_send_paused=v_paused,
+      customer_send_paused_at=case when v_paused then clock_timestamp() else customer_send_paused_at end,
+      send_policy_revision=send_policy_revision+1
+    where organization_id=p_org and id=p_mission
+    returning * into v_mission;
+    if v_paused then
+      update public.ai_reply_drafts d set status='stale',
+        error_code='mission_send_paused',updated_at=now()
+      where d.organization_id=p_org and d.status='approved'
+        and d.workbench_run_id in (
+          select r.id from public.ai_workbench_runs r
+          where r.organization_id=p_org and r.mission_id=p_mission
+        );
+      update public.job_queue j set status='failed',
+        locked_by=null,locked_at=null,last_error='mission_send_paused'
+      where j.organization_id=p_org and j.kind='approved_reply'
+        and j.status in ('pending','running')
+        and exists (
+          select 1 from public.ai_reply_drafts d
+          join public.ai_workbench_runs r
+            on r.organization_id=d.organization_id and r.id=d.workbench_run_id
+          where d.organization_id=j.organization_id and d.send_job_id=j.id
+            and d.status='stale' and d.error_code='mission_send_paused'
+            and r.mission_id=p_mission
+        );
+    end if;
+  end if;
+  insert into public.ai_mission_commands
+    (organization_id,mission_id,actor_user_id,request_key,kind,reason,
+     changed,paused_after,policy_revision)
+  values (p_org,p_mission,p_actor,p_request_key,p_kind,p_reason,
+          v_changed,v_paused,v_mission.send_policy_revision)
+  returning * into v_prior;
+  return jsonb_build_object('result',case when v_changed then 'changed' else 'unchanged' end,
+    'paused',v_paused,'revision',v_mission.send_policy_revision,'commandId',v_prior.id);
+end;
+$$;
+revoke all on function public.fn_set_ai_mission_send_policy(uuid,uuid,uuid,uuid,text,text)
+  from public, anon, authenticated;
+grant execute on function public.fn_set_ai_mission_send_policy(uuid,uuid,uuid,uuid,text,text)
+  to service_role;
+-- 0397 — manager directions and internal facts share an idempotent, scoped
+-- continuation ledger, but are never treated as the same authority.
+alter table public.ai_mission_internal_inputs
+  add column if not exists kind text not null default 'internal_fact';
+alter table public.ai_mission_internal_inputs
+  drop constraint if exists ai_mission_internal_inputs_kind_check;
+alter table public.ai_mission_internal_inputs
+  add constraint ai_mission_internal_inputs_kind_check
+  check (kind in ('internal_fact', 'manager_direction'));
+alter table public.ai_missions
+  add column if not exists current_direction text,
+  add column if not exists direction_revision bigint not null default 0;
+alter table public.ai_missions
+  drop constraint if exists ai_missions_current_direction_check;
+alter table public.ai_missions
+  add constraint ai_missions_current_direction_check
+  check (current_direction is null or char_length(current_direction) between 5 and 2000);
+create or replace function public.fn_reply_context_current(p_org uuid,p_id uuid)
+returns boolean language sql stable security definer set search_path=public as $$
+  select exists(
+    select 1 from public.ai_reply_drafts d
+    join public.conversations c on c.organization_id=d.organization_id and c.id=d.conversation_id and c.contact_id=d.contact_id
+    join public.ai_agents a on a.organization_id=d.organization_id and a.id=d.agent_id
+    join public.contacts p on p.organization_id=d.organization_id and p.id=d.contact_id
+    join public.channel_sessions s on s.organization_id=d.organization_id and s.id=d.channel_session_id
+    where d.organization_id=p_org and d.id=p_id
+      and c.reply_context_revision=d.context_revision and a.operation_revision=d.operation_revision
+      and a.archived_at is null and c.channel_session_id=d.channel_session_id and s.archived_at is null
+      and not p.is_blocked and not p.is_anonymized and public.fn_meet_boundary_current(d.service_boundary)
+      and (
+        (d.workbench_run_id is null and a.published_version_id=d.agent_version_id)
+        or (
+          d.workbench_run_id is not null and d.workbench_proposal_id is not null
+          and exists (
+            select 1 from public.ai_workbench_runs r
+            join public.ai_agent_action_proposals proposal
+              on proposal.organization_id=r.organization_id and proposal.run_id=r.id
+            where r.organization_id=d.organization_id and r.id=d.workbench_run_id
+              and r.agent_id=d.agent_id and r.mode='act'
+              and r.scope->>'conversationId'=d.conversation_id::text
+              and r.status in ('awaiting_confirmation','running','completed','partial','failed')
+              and (
+                r.mission_id is null or exists (
+                  select 1 from public.ai_missions m
+                  where m.organization_id=r.organization_id and m.id=r.mission_id
+                    and m.status not in ('cancelled','completed')
+                    and not m.customer_send_paused
+                    and (m.customer_send_paused_at is null or d.approved_at is null
+                      or d.approved_at > m.customer_send_paused_at)
+                    and a.is_active and a.paused_at is null
+                    and a.operation_mode='automatic'
+                )
+              )
+              and proposal.id=d.workbench_proposal_id and proposal.tool_name='send_message'
+              and proposal.tool_args->>'body'=d.original_body
+              and (
+                (proposal.status='pending' and d.status='pending')
+                or (proposal.status='executed' and d.status in ('approved','sending','sent'))
+              )
+          )
+        )
+      )
+  );
+$$;
+revoke all on function public.fn_reply_context_current(uuid,uuid)
+  from public, anon, authenticated;
+grant execute on function public.fn_reply_context_current(uuid,uuid)
+  to service_role;
+notify pgrst, 'reload schema';
 
 -- ---- VARREDURA anon: fecha os apêndices posteriores à migration 0116 ----
 -- O bloco original 0116 precede as migrations acrescentadas ao baseline ao

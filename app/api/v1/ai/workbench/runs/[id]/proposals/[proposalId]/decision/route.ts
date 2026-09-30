@@ -19,6 +19,10 @@ import { VALID_TOOL_IDS } from "@/lib/mcp/tools/catalog";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { requireSupportWrite } from "@/lib/impersonate/support";
+import { ASK_INTERNAL_COLLEAGUE_TOOL } from "@/lib/ai/agents/internal-question-contract";
+import {
+  approveProposedFeishuQuestion, InternalQuestionError,
+} from "@/lib/ai/internal-collaboration/feishu-question";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -59,7 +63,7 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<Response> {
   const { data: run } = await admin
     .from("ai_workbench_runs")
     .select(
-      "id, agent_id, actor_user_id, task, mode, status, runtime_state, final_text, scope, budget",
+      "id, agent_id, mission_id, actor_user_id, task, mode, status, runtime_state, final_text, scope, budget",
     )
     .eq("organization_id", authz.org.orgId)
     .eq("id", id)
@@ -92,6 +96,59 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<Response> {
       { requestId },
     );
 
+  if (proposal.tool_name === ASK_INTERNAL_COLLEAGUE_TOOL && parsed.data.decision === "approve") {
+    if (!run.mission_id)
+      return fail("state_conflict", "此提案没有关联商机任务，不能发送内部问题。", 409, { requestId });
+    try {
+      let result: Awaited<ReturnType<typeof approveProposedFeishuQuestion>> | null = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          result = await approveProposedFeishuQuestion(getRequestPool(), {
+            organizationId: authz.org.orgId,
+            missionId: run.mission_id,
+            runId: id,
+            proposalId,
+            approverUserId: authz.user.id,
+            reason: parsed.data.reason,
+          });
+          break;
+        } catch (error) {
+          const pgCode = error && typeof error === "object" && "code" in error
+            ? error.code : null;
+          // A worker may append its final usage event just as approval reads
+          // the next sequence. Roll back the whole transaction and retry;
+          // never replay only the outbox insertion.
+          if (attempt === 2 || !["23505", "40P01", "40001"].includes(String(pgCode)))
+            throw error;
+        }
+      }
+      if (!result) throw new Error("internal_question_approval_unavailable");
+      void audit({
+        action: "ai_workbench.action_approved",
+        actorUserId: authz.user.id,
+        organizationId: authz.org.orgId,
+        resourceType: "ai_agent_action_proposal",
+        resourceId: proposalId,
+        requestId,
+        metadata: { run_id: id, tool: ASK_INTERNAL_COLLEAGUE_TOOL,
+          question_id: result.questionId, delivery: "queued" },
+      });
+      return ok({ proposal_id: proposalId, status: "executed", run_status: "completed",
+        question_id: result.questionId, delivery: "queued" }, { requestId });
+    } catch (error) {
+      if (error instanceof InternalQuestionError) {
+        const code = error.code;
+        const unavailable = code === "channel_unavailable" || code === "recipient_unavailable";
+        return fail(code, unavailable
+          ? "飞书渠道或收件人目前不可用；没有创建发送任务。"
+          : "任务、Agent 或提案状态已变化；没有创建发送任务。",
+        unavailable ? 503 : 409, { requestId });
+      }
+      return fail("internal_error", "无法安全保存内部提问；没有创建发送任务。", 500,
+        { requestId });
+    }
+  }
+
   // Compare-and-set the run to serialize approvals and prevent duplicate writes
   // when two browser tabs decide at the same time.
   const { data: claimed } = await admin
@@ -104,6 +161,18 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<Response> {
     .maybeSingle();
   if (!claimed)
     return fail("state_conflict", "另一个决策正在处理，请刷新运行详情。", 409, { requestId });
+
+  if (parsed.data.decision === "approve" && run.mission_id) {
+    const { data: mission, error: missionError } = await admin.from("ai_missions")
+      .select("status")
+      .eq("organization_id", authz.org.orgId)
+      .eq("id", run.mission_id)
+      .maybeSingle();
+    if (missionError || !mission || ["cancelled", "completed"].includes(mission.status)) {
+      await restoreAwaitingConfirmation(admin, authz.org.orgId, id);
+      return fail("mission_not_active", "业务任务已停止，不能再批准关联动作。", 409, { requestId });
+    }
+  }
 
   const decidedAt = new Date().toISOString();
   const decision = parsed.data.decision;
@@ -174,6 +243,12 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<Response> {
     await appendWorkbenchEvent(admin, {
       organizationId: authz.org.orgId,
       runId: id,
+      type: "human_confirmation_received",
+      payload: { proposalId, decision, actorUserId: authz.user.id },
+    });
+    await appendWorkbenchEvent(admin, {
+      organizationId: authz.org.orgId,
+      runId: id,
       type: "policy_checked",
       payload: {
         proposalId,
@@ -222,6 +297,10 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<Response> {
         decision_reason: parsed.data.reason ?? null,
         decision_at: decidedAt,
         result_summary: { outcome: "rejected" },
+        ...(proposal.tool_name === ASK_INTERNAL_COLLEAGUE_TOOL
+          ? { tool_args: {}, preview: { externalEffect: "feishu_internal_question",
+              requiresHumanConfirmation: true, redacted: true } }
+          : {}),
       })
       .eq("organization_id", authz.org.orgId)
       .eq("id", proposalId)
@@ -233,6 +312,12 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<Response> {
       return fail("state_conflict", "这个动作已被其他请求处理。", 409, { requestId });
     }
     observation = { tool: proposal.tool_name, status: "rejected" };
+    await appendWorkbenchEvent(admin, {
+      organizationId: authz.org.orgId,
+      runId: id,
+      type: "human_confirmation_received",
+      payload: { proposalId, decision, actorUserId: authz.user.id },
+    });
   } else {
     const state = run.runtime_state as { versionId?: unknown };
     if (typeof state?.versionId !== "string") {
@@ -276,6 +361,12 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<Response> {
         requestId,
       });
     }
+    await appendWorkbenchEvent(admin, {
+      organizationId: authz.org.orgId,
+      runId: id,
+      type: "human_confirmation_received",
+      payload: { proposalId, decision, actorUserId: authz.user.id },
+    });
     await appendWorkbenchEvent(admin, {
       organizationId: authz.org.orgId,
       runId: id,
@@ -385,12 +476,6 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<Response> {
     }
   }
 
-  await appendWorkbenchEvent(admin, {
-    organizationId: authz.org.orgId,
-    runId: id,
-    type: "human_confirmation_received",
-    payload: { proposalId, decision, actorUserId: authz.user.id },
-  });
   if (decision === "reject")
     void audit({
       action: "ai_workbench.action_rejected",

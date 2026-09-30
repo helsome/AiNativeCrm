@@ -1,16 +1,36 @@
 import { appendWorkbenchEvent } from "@/lib/ai/agents/workbench-events";
-import { appendWorkbenchObservation } from "@/lib/ai/agents/workbench-state";
+import { MissionBudgetExceededError } from "@/lib/ai/agents/mission-budget";
+import { continueWorkbenchMessages } from "@/lib/ai/agents/workbench-state";
 import { executeReversibleLeadUpdate } from "@/lib/ai/agents/reversible-lead-update";
+import {
+  MissionDirectionFenceError, stopMissionRunAfterDirectionFence,
+  withMissionDirectionWriteFence,
+} from "@/lib/ai/agents/mission-direction-fence";
 import { workbenchToolEffect } from "@/lib/ai/agents/tool-effects";
+import {
+  ASK_INTERNAL_COLLEAGUE_TOOL, LIST_INTERNAL_COLLEAGUES_TOOL,
+  createMissionQuestionTools,
+} from "@/lib/ai/agents/internal-question-tools";
+import { canExposeInternalQuestionTools } from "@/lib/ai/agents/internal-question-contract";
 import { executePiTurnModelCall } from "@/lib/agent-engine/agent/pi-turn-execution";
 import type { RuntimeMessage } from "@/lib/agent-runtime";
-import type { ToolSet } from "@/lib/agent-engine/edge/llm/run-model-call";
+import type { RunModelCallInput, ToolSet } from "@/lib/agent-engine/edge/llm/run-model-call";
 import { loadAgentVersionConfig } from "@/lib/agent-engine/agent/agent-config";
 import { requestTurnDeps } from "@/lib/agent-engine/agent/request-deps";
 import { buildMcpTurnTools } from "@/lib/agent-engine/edge/crm/mcp-tools";
 import { getRequestPool } from "@/lib/agent-engine/db/request-pool";
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { extractProductFinalAnswer } from "@/lib/ai/agents/final-answer";
+import { aggregateWorkbenchLlmUsage, type WorkbenchLlmCallUsage } from "@/lib/ai/agents/workbench-usage";
+import { recoverWorkbenchResult } from "@/lib/ai/agents/workbench-result-recovery";
+import {
+  createWorkbenchResultChannel,
+  resultDocument,
+  SUBMIT_WORKBENCH_RESULT_TOOL,
+  WORKBENCH_RESULT_INSTRUCTION,
+  workbenchResultPartialReason,
+  workbenchFinalText,
+} from "@/lib/ai/agents/workbench-result-submission";
 
 type Admin = ReturnType<typeof createAdminClient>;
 
@@ -20,7 +40,9 @@ export async function runResumedWorkbenchTurn(input: {
   runId: string;
   jobId: string;
   agentId: string;
+  missionId: string | null;
   versionId: string;
+  runtimeState: Record<string, unknown>;
   task: string;
   mode: "inspect" | "act";
   scope: {
@@ -58,30 +80,26 @@ export async function runResumedWorkbenchTurn(input: {
   })();
 
   try {
-    const { rows: priorUsage } = await getRequestPool().query<{
-      input_tokens: number | null;
-      output_tokens: number | null;
-      cost_cents: number | null;
-    }>(
-      `select c.input_tokens, c.output_tokens, c.cost_cents
+    const { rows: priorUsage } = await getRequestPool().query<WorkbenchLlmCallUsage>(
+      `select c.input_tokens, c.output_tokens, c.cost_cents, c.status
        from llm_calls c
        join job_queue q on q.id = c.job_id and q.organization_id = c.organization_id
        where c.organization_id = $1 and q.payload->>'runId' = $2`,
       [organizationId, runId],
     );
-    const spentTokens = priorUsage.reduce(
-      (sum, row) => sum + (row.input_tokens ?? 0) + (row.output_tokens ?? 0),
-      0,
-    );
-    const spentCost = priorUsage.reduce((sum, row) => sum + Number(row.cost_cents ?? 0), 0);
+    const priorSummary = aggregateWorkbenchLlmUsage(priorUsage);
+    const spentTokens = priorSummary.inputTokens + priorSummary.outputTokens;
+    const spentCost = priorSummary.costCents;
     const stepLimitReached =
       input.budget.maxSteps != null && priorUsage.length >= input.budget.maxSteps;
     const remainingTokens =
       input.budget.tokenBudget == null ? null : input.budget.tokenBudget - spentTokens;
     const remainingCost =
-      input.budget.costBudgetCents == null ? null : input.budget.costBudgetCents - spentCost;
+      input.budget.costBudgetCents == null || spentCost == null
+        ? null : input.budget.costBudgetCents - spentCost;
     if (
       stepLimitReached ||
+      (input.budget.costBudgetCents != null && spentCost == null) ||
       (remainingTokens != null && remainingTokens <= 0) ||
       (remainingCost != null && remainingCost <= 0)
     ) {
@@ -92,7 +110,7 @@ export async function runResumedWorkbenchTurn(input: {
           status: "partial",
           final_text: input.priorFinalText,
           completed_at: new Date().toISOString(),
-          error_code: "budget_exhausted",
+          error_code: spentCost == null ? "budget_cost_unknown" : "budget_exhausted",
         })
         .eq("organization_id", organizationId)
         .eq("id", runId)
@@ -107,13 +125,7 @@ export async function runResumedWorkbenchTurn(input: {
         organizationId,
         runId,
         type: "usage_reported",
-        payload: {
-          inputTokens:
-            spentTokens - priorUsage.reduce((sum, row) => sum + (row.output_tokens ?? 0), 0),
-          outputTokens: priorUsage.reduce((sum, row) => sum + (row.output_tokens ?? 0), 0),
-          costCents: spentCost,
-          calls: priorUsage.length,
-        },
+        payload: { ...priorSummary },
       });
       return;
     }
@@ -131,6 +143,7 @@ export async function runResumedWorkbenchTurn(input: {
       { readOnly: input.mode === "inspect", workbenchProposalTools: true },
     );
     const proposalInputs: Array<{ tool: string; arguments: unknown }> = [];
+    const resultChannel = createWorkbenchResultChannel();
     let toolResultCount = 0;
     const effectByTool = new Map<string, NonNullable<ReturnType<typeof workbenchToolEffect>>>();
     const gatedTools: Record<string, unknown> = {};
@@ -155,9 +168,33 @@ export async function runResumedWorkbenchTurn(input: {
         },
       };
     }
-    const modelResult = await executePiTurnModelCall(
-      { pool: getRequestPool(), llmCfg: deps.llmCfg, log: deps.log, runtime: deps.runtime },
-      {
+    if (input.mode === "act" && input.missionId && input.scope.leadId) {
+      const { data: agentMetadata, error: agentMetadataError } = await admin
+        .from("ai_agents")
+        .select("builtin_key")
+        .eq("organization_id", organizationId)
+        .eq("id", input.agentId)
+        .maybeSingle();
+      if (agentMetadataError) throw new Error("workbench_agent_metadata_read_failed");
+      if (canExposeInternalQuestionTools({ mode: input.mode, missionId: input.missionId,
+        leadId: input.scope.leadId, builtinKey: agentMetadata?.builtin_key })) {
+        if (ASK_INTERNAL_COLLEAGUE_TOOL in gatedTools || LIST_INTERNAL_COLLEAGUES_TOOL in gatedTools)
+          throw new Error("mission_question_tool_name_collision");
+        Object.assign(gatedTools, createMissionQuestionTools({
+          pool: getRequestPool(),
+          organizationId,
+          leadId: input.scope.leadId,
+          recordProposal: (args) => proposalInputs.push({ tool: ASK_INTERNAL_COLLEAGUE_TOOL, arguments: args }),
+        }));
+        effectByTool.set(LIST_INTERNAL_COLLEAGUES_TOOL, { effect: "read", resource: "internal_colleagues" });
+        effectByTool.set(ASK_INTERNAL_COLLEAGUE_TOOL, { effect: "external", resource: "internal_questions" });
+      }
+    }
+    if (SUBMIT_WORKBENCH_RESULT_TOOL in gatedTools)
+      throw new Error("workbench_result_tool_name_collision");
+    Object.assign(gatedTools, resultChannel.tools);
+    const modelDeps = { pool: getRequestPool(), llmCfg: deps.llmCfg, log: deps.log, runtime: deps.runtime };
+    const modelCallInput = {
         tenantId: organizationId,
         jobId: input.jobId,
         workbenchRunId: runId,
@@ -165,13 +202,14 @@ export async function runResumedWorkbenchTurn(input: {
         purpose: "agent_turn",
         model: agentConfig.model,
         llmOverride: { provider: agentConfig.provider, credentialId: agentConfig.credentialId },
-        system: `${agentConfig.systemPrompt}\n\nUse CRM tools to verify facts. Follow the run mode and tool policy. Never claim a staged write or external action is complete. 最终报告不超过 2200 个中文字符；优先保留关键事实、冲突、证据缺口和可验证下一步，不复述内部分析过程。`,
+        system: `${agentConfig.systemPrompt}\n\nUse CRM tools to verify facts. Follow the run mode and tool policy. Never claim a staged write or external action is complete.\n${WORKBENCH_RESULT_INSTRUCTION}`,
         messages: [],
         runtimeMessages: input.messages,
         tools: gatedTools as ToolSet,
         maxSteps: input.budget.maxSteps ?? agentConfig.maxSteps,
         abortSignal: abortController.signal,
         shouldStopAfterTurn: ({ cumulativeUsage, costCents }) =>
+          resultChannel.submitted() !== null ||
           (remainingTokens != null && cumulativeUsage.totalTokens >= remainingTokens) ||
           (remainingCost != null && costCents !== null && costCents >= remainingCost),
         onEvent: async (event) => {
@@ -179,6 +217,7 @@ export async function runResumedWorkbenchTurn(input: {
           const data = event.data;
           const tool = typeof data.tool_name === "string" ? data.tool_name : undefined;
           const toolCallId = typeof data.tool_call_id === "string" ? data.tool_call_id : undefined;
+          if (tool === SUBMIT_WORKBENCH_RESULT_TOOL) return;
           if (event.type === "tool_execution_start" && tool) {
             const effect = effectByTool.get(tool);
             await appendWorkbenchEvent(admin, {
@@ -200,27 +239,54 @@ export async function runResumedWorkbenchTurn(input: {
             });
           }
         },
-      },
-    );
+    } satisfies RunModelCallInput;
+    const firstModelResult = await executePiTurnModelCall(modelDeps, modelCallInput);
     const { error: stateError } = await admin.from("ai_agent_run_states").upsert(
-      { organization_id: organizationId, run_id: runId, messages: modelResult.result.runtimeMessages as never },
+      { organization_id: organizationId, run_id: runId, messages: firstModelResult.result.runtimeMessages as never },
       { onConflict: "run_id" },
     );
     if (stateError) throw new Error("workbench_runtime_state_persist_failed");
-    const extractedAnswer = extractProductFinalAnswer(modelResult.result.text);
+    const recovery = await recoverWorkbenchResult({
+      deps: modelDeps,
+      first: firstModelResult,
+      originalCall: modelCallInput,
+      channel: resultChannel,
+      hasProposedActions: proposalInputs.length > 0,
+      maxRemainingSteps: (input.budget.maxSteps ?? agentConfig.maxSteps) - priorUsage.length - firstModelResult.result.turnCount,
+      remainingTokens,
+      remainingCostCents: remainingCost,
+      beforeSideEffect: input.beforeSideEffect,
+    });
+    const modelResult = recovery.call;
+    if (modelResult !== firstModelResult) {
+      await input.beforeSideEffect?.();
+      const { error: recoveredStateError } = await admin.from("ai_agent_run_states").upsert(
+        { organization_id: organizationId, run_id: runId, messages: modelResult.result.runtimeMessages as never },
+        { onConflict: "run_id" },
+      );
+      if (recoveredStateError) throw new Error("workbench_runtime_state_persist_failed");
+    }
+    await appendWorkbenchEvent(admin, {
+      organizationId, runId, type: "model_decision", payload: { resultRecovery: recovery.state },
+    });
+    const submittedResult = resultChannel.submitted();
+    const extractedAnswer = submittedResult ? null : extractProductFinalAnswer(modelResult.result.text);
     const answerImpediments = [
-      ...(extractedAnswer.inspection.internalDraftCodes.length > 0 && !extractedAnswer.sanitized
+      ...(!submittedResult && extractedAnswer!.inspection.internalDraftCodes.length > 0 && !extractedAnswer!.sanitized
         ? [{ code: "unsafe_internal_draft", message: "内部组织稿无法安全分离。" }]
         : []),
-      ...(extractedAnswer.inspection.likelyTruncated
+      ...(!submittedResult && extractedAnswer!.inspection.likelyTruncated
         ? [{ code: "answer_likely_truncated", message: "最终答案疑似被截断。" }]
+        : []),
+      ...(!submittedResult
+        ? [{ code: "structured_result_missing", message: "模型未通过结构化提交口交付结果。" }]
         : []),
     ];
     const result = {
       proposals: proposalInputs,
       candidates: [] as Array<{ body: string; trace: Array<{ gate: string; verdict: string; code: string }> }>,
       impediments: answerImpediments as Array<{ code: string; message: string }>,
-      finalText: extractedAnswer.text,
+      finalText: submittedResult?.summary ?? extractedAnswer!.text,
     };
 
     const { data: current } = await admin
@@ -254,7 +320,14 @@ export async function runResumedWorkbenchTurn(input: {
             sequence,
             tool_name: proposal.tool,
             tool_args: proposal.arguments as never,
-            preview: { requiresHumanConfirmation: true },
+            preview: {
+              requiresHumanConfirmation: true,
+              ...(proposal.tool === ASK_INTERNAL_COLLEAGUE_TOOL
+                ? { externalEffect: "feishu_internal_question",
+                    recipientUserId: (proposal.arguments as { recipientUserId: string }).recipientUserId,
+                    question: (proposal.arguments as { question: string }).question }
+                : {}),
+            },
             status: "pending",
           })
           .select("id")
@@ -271,10 +344,15 @@ export async function runResumedWorkbenchTurn(input: {
           input.mode === "act" && proposal.tool === "crm_update_lead" && mcp
             ? await (async () => {
                 await input.beforeSideEffect?.();
-                return executeReversibleLeadUpdate({
+                return withMissionDirectionWriteFence(getRequestPool(), {
+                  organizationId,
+                  missionId: input.missionId,
+                  runId,
+                  expectedRevision: input.runtimeState.directionRevision,
+                }, () => executeReversibleLeadUpdate({
                   args: proposal.arguments,
                   tools: mcp.tools as never,
-                });
+                }));
               })()
             : null;
         if (reversible) {
@@ -341,11 +419,14 @@ export async function runResumedWorkbenchTurn(input: {
       await mcp?.cleanup();
     }
 
-    let continuationMessages = input.messages;
+    // Continue from the model's completed turn. Starting from input.messages
+    // would discard the assistant/tool transcript produced in this turn.
+    const continuationMessages = continueWorkbenchMessages(
+      modelResult.result.runtimeMessages as RuntimeMessage[],
+      observations,
+    );
     if (observations.length > 0) {
       await input.beforeSideEffect?.();
-      for (const observation of observations)
-        continuationMessages = appendWorkbenchObservation(continuationMessages, observation);
       const { error } = await admin
         .from("ai_agent_run_states")
         .update({ messages: continuationMessages as never })
@@ -354,13 +435,14 @@ export async function runResumedWorkbenchTurn(input: {
       if (error) throw new Error("workbench_runtime_state_persist_failed");
     }
 
-    const finalText = [
-      input.priorFinalText,
-      result.finalText,
-      ...result.candidates.map((candidate) => candidate.body),
-    ]
-      .filter((value): value is string => Boolean(value))
-      .join("\n\n");
+    // A fresh schema-validated submission supersedes a prior-turn summary.
+    // Concatenating both could present an obsolete proposed action as current.
+    const finalText = workbenchFinalText({
+      submission: submittedResult,
+      priorText: input.priorFinalText,
+      fallbackText: result.finalText,
+      candidateBodies: result.candidates.map((candidate) => candidate.body),
+    });
     const { count: pendingCount } = await admin
       .from("ai_agent_action_proposals")
       .select("id", { count: "exact", head: true })
@@ -374,10 +456,20 @@ export async function runResumedWorkbenchTurn(input: {
       (item) => item.code === "unsafe_internal_draft" || item.code === "answer_likely_truncated",
     );
     const emptyFinalAnswer = !finalText.trim();
+    const partialReason = workbenchResultPartialReason({
+      finalText,
+      submission: submittedResult,
+      answerInvalidCode: answerInvalid
+        ? result.impediments.find((item) =>
+            ["unsafe_internal_draft", "answer_likely_truncated"].includes(item.code),
+          )?.code ?? "answer_invalid"
+        : null,
+      budgetExhausted: exhausted,
+    });
     const status =
       (pendingCount ?? 0) > 0
         ? "awaiting_confirmation"
-        : exhausted || answerInvalid || emptyFinalAnswer
+        : partialReason
           ? "partial"
           : "completed";
     if (observations.length > 0 && (pendingCount ?? 0) === 0 && !exhausted && !answerInvalid) {
@@ -402,17 +494,10 @@ export async function runResumedWorkbenchTurn(input: {
       .update({
         status,
         final_text: finalText || null,
-        error_code:
-          status === "partial"
-            ? emptyFinalAnswer
-              ? "empty_final_answer"
-              : answerInvalid
-                ? result.impediments.find((item) =>
-                    ["unsafe_internal_draft", "answer_likely_truncated"].includes(item.code),
-                  )?.code ?? null
-                : null
-            : null,
+        result_document: submittedResult ? resultDocument(submittedResult) : null,
+        error_code: status === "partial" ? partialReason : null,
         runtime_state: {
+          ...input.runtimeState,
           versionId: input.versionId,
           proposals: sequence,
           impediments: [
@@ -438,43 +523,25 @@ export async function runResumedWorkbenchTurn(input: {
           hasAnswer: !emptyFinalAnswer,
           ...(status === "partial"
             ? {
-                reason: emptyFinalAnswer
-                  ? "empty_final_answer"
-                  : answerInvalid
-                    ? result.impediments.find((item) =>
-                        ["unsafe_internal_draft", "answer_likely_truncated"].includes(item.code),
-                      )?.code
-                    : "budget_exhausted",
+                reason: partialReason,
               }
             : {}),
           proposalCount: newProposals.length,
         },
       });
 
-    const { rows } = await getRequestPool().query<{
-      input_tokens: number | null;
-      output_tokens: number | null;
-      cost_cents: number | null;
-    }>(
-      `select c.input_tokens, c.output_tokens, c.cost_cents
+    const { rows } = await getRequestPool().query<WorkbenchLlmCallUsage>(
+      `select c.input_tokens, c.output_tokens, c.cost_cents, c.status
        from llm_calls c join job_queue q on q.id = c.job_id and q.organization_id = c.organization_id
        where c.organization_id=$1 and q.payload->>'runId'=$2`,
       [organizationId, runId],
     );
-    const usage = rows.reduce(
-      (sum, row) => ({
-        inputTokens: sum.inputTokens + (row.input_tokens ?? 0),
-        outputTokens: sum.outputTokens + (row.output_tokens ?? 0),
-        costCents: sum.costCents + Number(row.cost_cents ?? 0),
-        calls: sum.calls + 1,
-      }),
-      { inputTokens: 0, outputTokens: 0, costCents: 0, calls: 0 },
-    );
+    const usage = aggregateWorkbenchLlmUsage(rows);
     await appendWorkbenchEvent(admin, {
       organizationId,
       runId,
       type: "usage_reported",
-      payload: usage,
+      payload: { ...usage },
     });
   } catch (error) {
     const { data: state } = await admin
@@ -484,12 +551,25 @@ export async function runResumedWorkbenchTurn(input: {
       .eq("id", runId)
       .maybeSingle();
     if (state?.status !== "cancelled") {
+      if (error instanceof MissionDirectionFenceError && input.missionId) {
+        if (state?.status !== "running") return;
+        await input.beforeSideEffect?.();
+        await stopMissionRunAfterDirectionFence(getRequestPool(), {
+          organizationId,
+          missionId: input.missionId,
+          runId,
+        }, error);
+        return;
+      }
       await input.beforeSideEffect?.();
+      const budgetExceeded = error instanceof MissionBudgetExceededError;
+      const status = budgetExceeded ? "partial" : "failed";
+      const code = budgetExceeded ? error.message : "resume_failed";
       await admin
         .from("ai_workbench_runs")
         .update({
-          status: "failed",
-          error_code: "resume_failed",
+          status,
+          error_code: code,
           error_summary: error instanceof Error ? error.name : "runtime_error",
           completed_at: new Date().toISOString(),
         })
@@ -499,10 +579,11 @@ export async function runResumedWorkbenchTurn(input: {
       await appendWorkbenchEvent(admin, {
         organizationId,
         runId,
-        type: "run_failed",
+        type: budgetExceeded ? "run_partial" : "run_failed",
         payload: {
-          code: "resume_failed",
-          errorType: error instanceof Error ? error.name : "runtime_error",
+          ...(budgetExceeded
+            ? { status: "partial", reason: code }
+            : { code, errorType: error instanceof Error ? error.name : "runtime_error" }),
         },
       });
     }

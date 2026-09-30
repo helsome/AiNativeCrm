@@ -115,6 +115,35 @@ describe("PiAgentRuntime", () => {
     );
   });
 
+  it("keeps private reasoning out of the answer while preserving provider continuation", async () => {
+    const { runtime } = runtimeWithFaux([
+      fauxAssistantMessage([
+        { type: "thinking", thinking: "private planning text", thinkingSignature: "signed-thought" },
+        { type: "text", text: "visible result" },
+      ], { responseId: "response-1" }),
+      (context) => {
+        const previous = context.messages.find((message) => message.role === "assistant");
+        expect(previous?.content).toEqual(expect.arrayContaining([
+          expect.objectContaining({ type: "thinking", thinkingSignature: "signed-thought" }),
+        ]));
+        expect(previous).toEqual(expect.objectContaining({ responseId: "response-1" }));
+        return fauxAssistantMessage("continued result");
+      },
+    ]);
+    const first = await runtime.run({ systemPrompt: "CRM", prompt: "start", model });
+    expect(first.finalText).toBe("visible result");
+    const publicMessage = first.messages.find((message) => message.role === "assistant");
+    expect(publicMessage?.content).toBe("visible result");
+    const restored = JSON.parse(JSON.stringify(first.messages));
+    const second = await runtime.run({
+      systemPrompt: "CRM",
+      messages: restored,
+      prompt: "continue",
+      model,
+    });
+    expect(second.finalText).toBe("continued result");
+  });
+
   it("executes a tool and continues with its result", async () => {
     const { runtime } = runtimeWithFaux([
       fauxAssistantMessage(fauxToolCall("lookup", { id: "lead-1" }), {
@@ -150,6 +179,123 @@ describe("PiAgentRuntime", () => {
     ]);
     expect(result.events.some((event) => event.type === "tool_execution_start")).toBe(true);
     expect(result.events.some((event) => event.type === "tool_execution_end")).toBe(true);
+  });
+
+  it("injects a polled manager direction after the current tool batch, once per source ID", async () => {
+    const instruction = "负责人新方向：先核对新合同，不沿用旧交期";
+    const { runtime } = runtimeWithFaux([
+      fauxAssistantMessage(fauxToolCall("lookup", { id: "lead-1" }), { stopReason: "toolUse" }),
+      (context) => {
+        expect(JSON.stringify(context.messages)).toContain(instruction);
+        return fauxAssistantMessage("已按新合同继续核对");
+      },
+    ]);
+    const lookup = vi.fn(async () => ({ content: "旧交期：下周二" }));
+    const poll = vi.fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([{ id: "direction-1", content: instruction }]);
+    const result = await runtime.run({
+      systemPrompt: "CRM", prompt: "核对交期", model, maxTurns: 4,
+      tools: [{ name: "lookup", description: "查商机", capability: "read",
+        inputSchema: { type: "object", properties: { id: { type: "string" } } },
+        execute: lookup }],
+      steering: { poll },
+    });
+    expect(lookup).toHaveBeenCalledOnce();
+    expect(poll).toHaveBeenCalledTimes(3);
+    expect(result.finalText).toBe("已按新合同继续核对");
+    expect(result.messages.some((message) => message.role === "user" &&
+      JSON.stringify(message.content).includes(instruction))).toBe(true);
+    const steeringEvents = result.events.filter((event) => event.type === "steering_queued");
+    expect(steeringEvents).toEqual([{ type: "steering_queued", data: { steeringId: "direction-1" } }]);
+    expect(JSON.stringify(steeringEvents)).not.toContain(instruction);
+    expect(result.events.filter((event) => event.type === "steering_consumed"))
+      .toEqual([{ type: "steering_consumed", data: { steeringId: "direction-1" } }]);
+  });
+
+  it("consumes a durable direction already pending before the first model request", async () => {
+    const direction = "先核对负责人刚更新的合同";
+    const { runtime } = runtimeWithFaux([(context) => {
+      expect(JSON.stringify(context.messages)).toContain(direction);
+      return fauxAssistantMessage("已核对新合同");
+    }]);
+    const result = await runtime.run({ systemPrompt: "CRM", prompt: "核对商机", model,
+      maxTurns: 1, steering: { poll: async () => [{ id: "direction-before-start", content: direction }] } });
+    expect(result.events.filter((event) => event.type === "steering_consumed"))
+      .toEqual([{ type: "steering_consumed", data: { steeringId: "direction-before-start" } }]);
+  });
+
+  it("acknowledges only the direction included in a successful model turn", async () => {
+    const first = "先核对合同版本一";
+    const second = "再核对合同版本二";
+    const { runtime } = runtimeWithFaux([(context) => {
+      expect(JSON.stringify(context.messages)).toContain(first);
+      expect(JSON.stringify(context.messages)).not.toContain(second);
+      return fauxAssistantMessage("第一条方向已处理");
+    }]);
+    const result = await runtime.run({ systemPrompt: "CRM", prompt: "核对商机", model,
+      maxTurns: 1, steering: { poll: async () => [
+        { id: "direction-first", content: first },
+        { id: "direction-second", content: second },
+      ] } });
+    expect(result.events.filter((event) => event.type === "steering_queued")).toHaveLength(2);
+    expect(result.events.filter((event) => event.type === "steering_consumed"))
+      .toEqual([{ type: "steering_consumed", data: { steeringId: "direction-first" } }]);
+    expect(result.messages.some((message) => message.role === "user" &&
+      JSON.stringify(message.content).includes(second))).toBe(false);
+  });
+
+  it("does not acknowledge a direction when the model turn fails", async () => {
+    const { runtime } = runtimeWithFaux([
+      fauxAssistantMessage("", { stopReason: "error" }),
+    ]);
+    const result = await runtime.run({ systemPrompt: "CRM", prompt: "核对商机", model,
+      steering: { poll: async () => [{ id: "direction-failed", content: "先核对新合同" }] } });
+    expect(result.events.some((event) => event.type === "steering_queued")).toBe(true);
+    expect(result.events.some((event) => event.type === "steering_consumed")).toBe(false);
+  });
+
+  it("does not acknowledge a direction removed by context transformation", async () => {
+    const direction = "负责人要求核对新版交期";
+    const { runtime } = runtimeWithFaux([(context) => {
+      expect(JSON.stringify(context.messages)).not.toContain(direction);
+      return fauxAssistantMessage("缺少新版交期");
+    }]);
+    const result = await runtime.run({ systemPrompt: "CRM", prompt: "核对商机", model,
+      maxTurns: 1,
+      steering: { poll: async () => [{ id: "direction-filtered", content: direction }] },
+      transformContext: (messages) => messages.filter((message) =>
+        message.role !== "user" || !JSON.stringify(message.content).includes(direction)),
+    });
+    expect(result.events.some((event) => event.type === "steering_queued")).toBe(true);
+    expect(result.events.some((event) => event.type === "steering_consumed")).toBe(false);
+  });
+
+  it("leaves steering unconsumed when the hard turn limit has been reached", async () => {
+    const { runtime } = runtimeWithFaux([fauxAssistantMessage("预算前的结论")]);
+    const poll = vi.fn(async () => []);
+    const result = await runtime.run({ systemPrompt: "CRM", prompt: "先查商机", model,
+      maxTurns: 1, steering: { poll } });
+    expect(poll).toHaveBeenCalledOnce();
+    expect(result.finalText).toBe("预算前的结论");
+    expect(result.events.some((event) => event.type === "steering_queued")).toBe(false);
+  });
+
+  it("does not mistake a queued steer for delivery when CRM stop policy ends the turn", async () => {
+    const { runtime } = runtimeWithFaux([fauxAssistantMessage("旧结论")]);
+    const poll = vi.fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "direction-2", content: "改按新合同核对" }]);
+    const result = await runtime.run({ systemPrompt: "CRM", prompt: "核对", model,
+      maxTurns: 3,
+      steering: { poll },
+      shouldStopAfterTurn: () => true,
+    });
+    expect(result.events.some((event) => event.type === "steering_queued")).toBe(true);
+    expect(result.events.some((event) => event.type === "steering_consumed")).toBe(false);
+    expect(result.messages.some((message) => message.role === "user" &&
+      JSON.stringify(message.content).includes("改按新合同核对"))).toBe(false);
+    expect(result.finalText).toBe("旧结论");
   });
 
   it("blocks a tool in beforeToolCall without executing its side effect", async () => {

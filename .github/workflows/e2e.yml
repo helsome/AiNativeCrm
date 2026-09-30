@@ -14,7 +14,7 @@ name: e2e
 # mesmo 127.0.0.1. Ver o comentário do passo "E2E — parte 1 de 4".
 #
 # É CHECK OBRIGATÓRIO. A régua, para reconferir em vez de acreditar nesta linha:
-#   $ gh api repos/helsome/AiNativeCrm/branches/main/protection \
+#   $ gh api repos/melgarafael/pi-native-crm/branches/main/protection \
 #       --jq '.required_status_checks.contexts|join(", ")'
 #   verify, build-and-size, invariants, e2e, imagens-ok   # medido em 2026-08-14
 #
@@ -165,7 +165,7 @@ jobs:
     # que brigam (guarda de travamento × detector de crescimento) e de que só o
     # primeiro depende do valor. O argumento continua certo para o `verify`.
     #
-    # Aqui ele é FALSO, e quem mostrou foi o contribuidor no #1056: com o corte
+    # Aqui ele é FALSO, e quem mostrou foi o @webtecnica no #1056: com o corte
     # legível dele em TETO − MARGEM, o `timeout-minutes` vira inalcançável, e o
     # portão real passa a ser TETO_SEGUNDOS. Subir os dois juntos não separa
     # papel nenhum — move o portão de 28 para 43 min. É exatamente o
@@ -797,7 +797,7 @@ jobs:
       #       O `.limit(1)` recorta ANTES da checagem de singularidade. Ou seja:
       #       o `beforeAll` desta suíte — que zera `onboarded_at`, apaga
       #       `ai_agents` e apaga `channel_sessions` — apagava dados de uma
-      #       organização QUALQUER, em silêncio. Levantado por contribuidor
+      #       organização QUALQUER, em silêncio. Levantado por @Elevstudio-Dev
       #       (PR #559) depois de acontecer numa instalação de trabalho.
       #
       #       A instância está corrigida (a org sai do dono do bootstrap) e a
@@ -1082,6 +1082,9 @@ jobs:
       # cria uma nova execução multi-Agent; a segunda exige CRM_EVAL_RUN_ID de
       # uma execução local já concluída e valida o Judge + cache. O CI comum usa
       # INTERNAL_AGENT_RUN_STUB e não possui esse estado nem credencial real.
+      # Esta spec também usa o provider real da organização de demonstração
+      # para validar submissão estruturada e assertivas de campos do CRM; o CI
+      # compartilhado não deve chamá-lo nem gastar credenciais externas.
       FORA_DO_CI: >-
         inbox-tempo-real.spec.ts
         cadastro-sem-confirmacao-de-email.spec.ts
@@ -1090,6 +1093,7 @@ jobs:
         agent-crm-workbench-real-tenant.spec.ts
         agent-multi-agent-eval-real-model.spec.ts
         agent-semantic-judge-real-model.spec.ts
+        agent-workbench-structured-result-real-model.spec.ts
     steps:
       # ── O RELÓGIO DESTA PARTE: ONDE O TETO DE 30 MIN COMEÇA A CONTAR ──────
       #
@@ -1128,7 +1132,7 @@ jobs:
             # ── A CARÊNCIA DO KILL É UM CUSTO, E ELE FOI MEDIDO ─────────
             #
             # O corte abaixo usa `timeout -k 30 --signal=TERM`. O `-k 30` NÃO é
-            # grátis, e o custo tem uma condição. Medido pelo contribuidor
+            # grátis, e o custo tem uma condição. Medido pelo @webtecnica
             # (GNU coreutils 9.4, orçamento reduzido a 2s e filho dormindo 90s
             # para não terminar sozinho e mascarar a carência):
             #

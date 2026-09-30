@@ -247,6 +247,7 @@ export interface RunModelCallInput {
   afterToolCall?: AgentTurnInput["afterToolCall"];
   /** CRM policy callback; pricing stays inside this gateway. */
   shouldStopAfterTurn?: RunModelStopCallback;
+  steering?: AgentTurnInput["steering"];
   onEvent?: (event: AgentRuntimeEvent) => void | Promise<void>;
 }
 
@@ -746,6 +747,7 @@ export async function runModelCall(
       ...(input.transformContext ? { transformContext: input.transformContext } : {}),
       ...(input.beforeToolCall ? { beforeToolCall: input.beforeToolCall } : {}),
       ...(input.afterToolCall ? { afterToolCall: input.afterToolCall } : {}),
+      ...(input.steering ? { steering: input.steering } : {}),
       shouldStopAfterTurn: async (stopInput: RuntimeStopInput) => {
         turnsObserved += 1;
         cumulativeUsage.inputTokens += stopInput.usage.inputTokens;
@@ -758,7 +760,7 @@ export async function runModelCall(
           (await input.shouldStopAfterTurn({
             ...stopInput,
             cumulativeUsage: { ...cumulativeUsage },
-            costCents: costCents(model, cumulativeUsage, cfg.cacheTtl ?? "1h"),
+            costCents: costCents(model, cumulativeUsage, cfg.cacheTtl ?? "1h", config.provider),
           })) ?? false
         );
       },
@@ -812,7 +814,7 @@ export async function runModelCall(
   // O TTL é o MESMO que gravou o prefixo estável acima: a gravação de cache custa
   // 1.25× a entrada em 5m e 2× em 1h, e supor a doutrina superfaturaria 60% da
   // parcela de cache write em quem usa o knob.
-  const cost = costCents(model, usage, cfg.cacheTtl ?? "1h");
+  const cost = costCents(model, usage, cfg.cacheTtl ?? "1h", config.provider);
 
   const { rows } = await db.query<{ id: string }>(
     `insert into llm_calls

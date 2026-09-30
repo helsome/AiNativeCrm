@@ -20,4 +20,17 @@ describe("CRM workbench event payloads", () => {
       body: "private draft",
     })).toEqual({ decision: "veto", verdict: "veto", tool: "send_message", gate: "opt_out", code: "blocked" });
   });
+
+  it("keeps numeric usage counts but never lets a token-shaped string through", () => {
+    expect(redactEventPayload("usage_reported", {
+      inputTokens: 20_627,
+      outputTokens: 1_140,
+      costCents: 0,
+      calls: 2,
+      accessToken: "secret",
+    })).toEqual({ inputTokens: 20_627, outputTokens: 1_140, costCents: 0, calls: 2 });
+    expect(redactEventPayload("usage_reported", {
+      inputTokens: "secret-in-token-field", outputTokens: -1, costCents: null,
+    })).toEqual({ inputTokens: "[REDACTED]", outputTokens: "[REDACTED]", costCents: null });
+  });
 });

@@ -121,8 +121,9 @@ describe("a chamada que falha vira linha no log", () => {
 describe("a classificação separa os problemas que exigem conversas diferentes", () => {
   const codigoDe = async (erro: unknown): Promise<string> => {
     const { linhaDeErro } = await chamarComErro(erro);
-    // O código é o 9º parâmetro do insert de falha (ver registrarFalha).
-    return String(linhaDeErro!.params[8]);
+    // O código é o 10º parâmetro; workbench_run_id/variant_id deslocaram
+    // os campos quando o log passou a ligar chamadas a runs duráveis.
+    return String(linhaDeErro!.params[9]);
   };
 
   it("chave recusada", async () => {
@@ -174,7 +175,7 @@ describe("a classificação separa os problemas que exigem conversas diferentes"
 describe("o que NUNCA pode entrar no log", () => {
   it("a mensagem de erro é truncada", async () => {
     const { linhaDeErro } = await chamarComErro(new Error("x".repeat(5000)));
-    expect(String(linhaDeErro!.params[9]).length).toBeLessThanOrEqual(500);
+    expect(String(linhaDeErro!.params[10]).length).toBeLessThanOrEqual(500);
   });
 
   it("o conteúdo da conversa não vai junto", async () => {

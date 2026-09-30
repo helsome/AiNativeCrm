@@ -268,6 +268,29 @@ describe("o conjunto de pontos do agente publicado", () => {
     ]);
   });
 
+  it("specialist herda o par completo da missão e não anuncia modelo sem pai", () => {
+    const semPai = decidirBinding(entrada({
+      pontoId: "agent_specialist",
+      binding: binding({ purpose: "agent_specialist" }),
+    }));
+    expect(semPai).toMatchObject({
+      origem: "herdado_de_quem_chamou",
+      modelId: null,
+      credentialId: null,
+    });
+    const comPai = decidirBinding(entrada({
+      pontoId: "agent_specialist",
+      binding: binding({ purpose: "agent_specialist" }),
+      agentePublicado: agente(),
+    }));
+    expect(comPai).toMatchObject({
+      origem: "herdado_de_quem_chamou",
+      provider: "openai",
+      modelId: "gpt-5-mini",
+      credentialId: "cred-openai",
+    });
+  });
+
   it("preview conserva modelo, provider e credencial da versão apesar do binding e do ambiente", () => {
     const d = decidirBinding(entrada({
       pontoId: "agent_preview",

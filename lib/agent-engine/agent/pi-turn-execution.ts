@@ -1,6 +1,11 @@
 import type pg from "pg";
 
 import type { AgentRuntime } from "@/lib/agent-runtime";
+import {
+  loadMissionBudgetForRun,
+  missionBudgetBlockReason,
+  MissionBudgetExceededError,
+} from "@/lib/ai/agents/mission-budget";
 
 import type { Logger } from "../obs/logger";
 import {
@@ -27,7 +32,25 @@ export async function executePiTurnModelCall(
   },
   input: RunModelCallInput,
 ) {
-  return runModelCall(deps.pool, deps.llmCfg, input, {
+  const missionBudget = input.workbenchRunId
+    ? await loadMissionBudgetForRun(deps.pool, input.tenantId, input.workbenchRunId)
+    : null;
+  if (missionBudget) {
+    const reason = missionBudgetBlockReason(missionBudget);
+    if (reason) throw new MissionBudgetExceededError(reason);
+  }
+  const remainingTokens = missionBudget
+    ? missionBudget.maxTotalTokens - missionBudget.usedTokens : null;
+  const remainingCostCents = missionBudget
+    ? missionBudget.maxTotalCostCents - missionBudget.usedCostCents : null;
+  const guardedInput = missionBudget ? {
+    ...input,
+    shouldStopAfterTurn: async (turn: Parameters<NonNullable<typeof input.shouldStopAfterTurn>>[0]) =>
+      Boolean(await input.shouldStopAfterTurn?.(turn)) ||
+      turn.cumulativeUsage.totalTokens >= remainingTokens! ||
+      turn.costCents === null || turn.costCents >= remainingCostCents!,
+  } : input;
+  return runModelCall(deps.pool, deps.llmCfg, guardedInput, {
     log: deps.log,
     ...(deps.runtime ? { runtime: deps.runtime } : {}),
   });

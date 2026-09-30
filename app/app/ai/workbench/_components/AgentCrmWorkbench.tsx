@@ -44,6 +44,30 @@ type Proposal = {
   can_undo?: boolean;
 };
 type Detail = Run & {
+  result_document?: {
+    revision: number;
+    trust: "model_submitted";
+    summary: string;
+    evidence: Array<{ sourceType: string; sourceId: string; claim: string }>;
+    missingInformation: string[];
+    nextStep: string;
+    wakeCondition: string;
+  } | null;
+  mission?: {
+    id: string;
+    lead_id: string;
+    goal: string;
+    acceptance_criteria: string;
+    customer_send_paused: boolean;
+    acceptance_contract: {
+      revision: 1;
+      checks: Array<{ kind: "lead_status"; equals: "open" | "won" | "lost" } |
+        { kind: "customer_inbound_after_verified_send" }>;
+    } | null;
+    status: string;
+    blocked_reason: string | null;
+    deadline_at: string | null;
+  } | null;
   events: EventRow[];
   proposals: Proposal[];
   specialists: Array<{
@@ -122,6 +146,7 @@ const TOOL_LABELS: Record<string, string> = {
   crm_request_human_handoff: "请求转交人工",
   crm_update_lead: "更新商机字段",
   send_message: "发送客户回复",
+  ask_internal_colleague: "向飞书同事提问",
 };
 
 function eventLabel(event: EventRow): string {
@@ -140,23 +165,31 @@ export function AgentCrmWorkbench({
   agents,
   modelConfigured,
   canCopy,
+  initialLead,
 }: {
   agents: Agent[];
   modelConfigured: boolean;
   canCopy: boolean;
+  initialLead?: { id: string; title: string; pipelineId: string } | null;
 }) {
   const [agentId, setAgentId] = useState(agents[0]?.id ?? "");
   const [task, setTask] = useState("");
-  const [mode, setMode] = useState<"inspect" | "act">("inspect");
+  const [mode, setMode] = useState<"inspect" | "act">(initialLead ? "act" : "inspect");
+  const [delegateMission, setDelegateMission] = useState(Boolean(initialLead));
+  const [acceptanceCriteria, setAcceptanceCriteria] = useState("");
+  const [observableLeadStatus, setObservableLeadStatus] = useState<"" | "open" | "won" | "lost">("");
+  const [requireCustomerInbound, setRequireCustomerInbound] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [detail, setDetail] = useState<Detail | null>(null);
   const [runs, setRuns] = useState<Run[]>([]);
-  const [objectKind, setObjectKind] = useState<ObjectKind>("contact");
+  const [objectKind, setObjectKind] = useState<ObjectKind>(initialLead ? "lead" : "contact");
   const [objectQuery, setObjectQuery] = useState("");
   const [objectOptions, setObjectOptions] = useState<ScopeOption[]>([]);
-  const [scope, setScope] = useState<Scope>({});
-  const [scopeLabel, setScopeLabel] = useState("");
+  const [scope, setScope] = useState<Scope>(initialLead
+    ? { leadId: initialLead.id, pipelineId: initialLead.pipelineId }
+    : {});
+  const [scopeLabel, setScopeLabel] = useState(initialLead?.title ?? "");
   const selected = agents.find((agent) => agent.id === agentId) ?? agents[0];
 
   const fetchRuns = async (): Promise<Run[]> => {
@@ -230,9 +263,17 @@ export function AgentCrmWorkbench({
 
   const run = async () => {
     if (!selected || !task.trim() || !modelConfigured) return;
+    if (delegateMission && (mode !== "act" || !scope.leadId || !acceptanceCriteria.trim())) {
+      setError("委托商机任务需要选择商机、分级自治模式，并填写业务验收条件。");
+      return;
+    }
     setBusy(true);
     setError("");
     setDetail(null);
+    const observableChecks = [
+      ...(observableLeadStatus ? [{ kind: "lead_status" as const, equals: observableLeadStatus }] : []),
+      ...(requireCustomerInbound ? [{ kind: "customer_inbound_after_verified_send" as const }] : []),
+    ];
     try {
       const response = await fetch("/api/v1/ai/workbench/runs", {
         method: "POST",
@@ -242,6 +283,11 @@ export function AgentCrmWorkbench({
           task,
           mode,
           ...(Object.keys(scope).length ? { scope } : {}),
+          ...(delegateMission ? { mission: {
+            goal: task.trim(),
+            acceptanceCriteria: acceptanceCriteria.trim(),
+            ...(observableChecks.length ? { acceptanceContract: { revision: 1, checks: observableChecks } } : {}),
+          } } : {}),
         }),
       });
       const body = await response.json();
@@ -253,6 +299,10 @@ export function AgentCrmWorkbench({
       const [finalDetail] = await Promise.all([fetchDetail(runId), loadRuns()]);
       setDetail(finalDetail);
       setTask("");
+      setDelegateMission(false);
+      setAcceptanceCriteria("");
+      setObservableLeadStatus("");
+      setRequireCustomerInbound(false);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "运行失败");
     } finally {
@@ -520,6 +570,26 @@ export function AgentCrmWorkbench({
               {detail.final_text}
             </article>
           )}
+          {detail?.result_document && (
+            <section className="mt-3 space-y-2 rounded-lg border p-4 text-sm" aria-label="结构化结果">
+              <p className="font-medium">结构化结果 <span className="font-normal text-muted-foreground">· Agent 陈述，业务结果尚需核验</span></p>
+              {detail.result_document.evidence.length > 0 && (
+                <div>
+                  <p className="text-muted-foreground">引用线索（未独立核验）</p>
+                  {detail.result_document.evidence.map((item, index) => (
+                    <p key={`${item.sourceType}-${item.sourceId}-${index}`} className="break-words">
+                      {item.claim} · {item.sourceType} · {item.sourceId}
+                    </p>
+                  ))}
+                </div>
+              )}
+              {detail.result_document.missingInformation.length > 0 && (
+                <p>缺失信息：{detail.result_document.missingInformation.join("；")}</p>
+              )}
+              {detail.result_document.nextStep && <p>建议下一步：{detail.result_document.nextStep}</p>}
+              <p className="text-muted-foreground">建议唤醒条件：{detail.result_document.wakeCondition}（不自动设置）</p>
+            </section>
+          )}
           {error && (
             <p role="alert" className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
               {error}
@@ -600,6 +670,52 @@ export function AgentCrmWorkbench({
             placeholder="例如：找出停滞商机并建议明天的跟进计划…"
             className="min-h-24 w-full resize-y rounded-lg border bg-background p-3 text-sm focus:ring-2 focus:ring-ring"
           />
+          {mode === "act" && scope.leadId && (
+            <div className="space-y-2 rounded-md border p-3 text-sm">
+              <label className="flex items-center gap-2 font-medium">
+                <input
+                  type="checkbox"
+                  checked={delegateMission}
+                  onChange={(event) => setDelegateMission(event.target.checked)}
+                />
+                建立商机业务任务
+              </label>
+              {delegateMission && (
+                <>
+                  <input
+                    aria-label="业务验收条件"
+                    value={acceptanceCriteria}
+                    onChange={(event) => setAcceptanceCriteria(event.target.value)}
+                    placeholder="例如：客户确认报价与交期，商机记录和下一次跟进均已更新"
+                    className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Agent 本轮结束后，任务仍等待业务结果验收；模型回答本身不会把任务标记为完成。
+                  </p>
+                  <div className="space-y-2 rounded-md border p-2 text-xs">
+                    <p className="font-medium">可观察条件（可选，由 CRM 事实核对）</p>
+                    <label className="flex items-center gap-2">
+                      商机当前状态
+                      <select value={observableLeadStatus}
+                        onChange={(event) => setObservableLeadStatus(event.target.value as "" | "open" | "won" | "lost")}
+                        className="rounded-md border bg-background px-2 py-1">
+                        <option value="">不要求</option>
+                        <option value="open">进行中</option>
+                        <option value="won">赢单</option>
+                        <option value="lost">丢单</option>
+                      </select>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={requireCustomerInbound}
+                        onChange={(event) => setRequireCustomerInbound(event.target.checked)} />
+                      已核实发送后，同一会话出现客户后续文本
+                    </label>
+                    <p className="text-muted-foreground">这些条件只能核对记录和时间；不能证明客户接受价格、交期或其他自由文本承诺。</p>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           <div className="flex items-center justify-between gap-3">
             <span className="text-xs text-muted-foreground">真实模型 · 组织级权限 · 操作留痕</span>
             <button
@@ -620,6 +736,25 @@ export function AgentCrmWorkbench({
         </div>
         {detail ? (
           <>
+            {detail.mission && (
+              <section className="rounded-lg border p-3 text-sm" data-testid="crm-mission-state">
+                <h3 className="font-semibold">商机业务任务 · {detail.mission.status}</h3>
+                <p className="mt-2">{detail.mission.goal}</p>
+                <p className="mt-2 text-xs text-muted-foreground">验收条件：{detail.mission.acceptance_criteria}</p>
+                {detail.mission.customer_send_paused && (
+                  <p className="text-xs text-destructive">客户发送已被负责人暂停；旧审批不能继续发送。</p>
+                )}
+                {detail.mission.acceptance_contract?.checks.map((check) => (
+                  <p key={check.kind} className="text-xs text-muted-foreground">
+                    可观察条件：{check.kind === "lead_status"
+                      ? `商机当前状态为 ${check.equals}` : "已核实发送后有同会话入站文本"}
+                  </p>
+                ))}
+                {detail.mission.blocked_reason && (
+                  <p className="mt-2 text-xs text-muted-foreground">当前原因：{detail.mission.blocked_reason}</p>
+                )}
+              </section>
+            )}
             <div className="rounded-lg bg-muted/60 p-3 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">状态</span>
@@ -660,15 +795,26 @@ export function AgentCrmWorkbench({
                     <p className="mt-1 text-xs text-muted-foreground">
                       {proposal.tool_name === "send_message"
                         ? "草稿尚未发送。批准后创建 CRM 审核发送任务，由正式 worker 重新检查实时策略和会话状态。"
+                        : proposal.tool_name === "ask_internal_colleague"
+                          ? "问题尚未发送。批准后进入飞书发送队列；送达和同事回复会分别记录，任务不会因此自动完成。"
                         : "Agent 未执行此动作。批准后由 CRM Harness 再次校验并调用。"}
                     </p>
+                    {proposal.tool_name === "ask_internal_colleague" &&
+                      typeof proposal.preview.question === "string" && (
+                        <div className="mt-2 rounded-md bg-muted p-2 text-xs">
+                          <p>收件人 CRM 用户：{String(proposal.preview.recipientUserId ?? "未知")}</p>
+                          <p className="mt-1 whitespace-pre-wrap">问题：{proposal.preview.question}</p>
+                        </div>
+                      )}
                     <div className="mt-3 flex gap-2">
                       <button
                         disabled={busy}
                         onClick={() => void decide(proposal.id, "approve")}
                         className="rounded-md bg-primary px-3 py-1.5 text-xs text-primary-foreground"
                       >
-                        {proposal.tool_name === "send_message" ? "批准并进入发送队列" : "批准执行"}
+                        {proposal.tool_name === "send_message" ||
+                          proposal.tool_name === "ask_internal_colleague"
+                          ? "批准并进入发送队列" : "批准执行"}
                       </button>
                       <button
                         disabled={busy}
@@ -698,7 +844,9 @@ export function AgentCrmWorkbench({
                     {TOOL_LABELS[proposal.tool_name] ?? proposal.tool_name}
                   </span>
                   <span className="ml-2 text-xs text-muted-foreground">
-                    {proposal.tool_name === "send_message" && proposal.status === "executed"
+                    {(proposal.tool_name === "send_message" ||
+                      proposal.tool_name === "ask_internal_colleague") &&
+                      proposal.status === "executed"
                       ? "已进入 CRM 发送队列"
                       : proposal.status}
                   </span>

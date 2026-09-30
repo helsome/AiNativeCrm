@@ -62,7 +62,14 @@ export function parseRuntimeMessages(value: unknown): RuntimeMessage[] | null {
       else {
         const toolCalls = message.toolCalls === undefined ? [] : parseToolCalls(message.toolCalls);
         if (toolCalls === null) return null;
-        messages.push({ role: "assistant", content, ...(toolCalls.length ? { toolCalls } : {}) });
+        messages.push({
+          role: "assistant",
+          content,
+          ...(toolCalls.length ? { toolCalls } : {}),
+          ...(message.privateContinuation !== undefined
+            ? { privateContinuation: message.privateContinuation }
+            : {}),
+        });
       }
       continue;
     }
@@ -102,6 +109,14 @@ export function appendWorkbenchObservation(
       content: `CRM Harness 执行动作后的观察结果。请基于此结果继续原任务；不要重复已经执行的动作。\n${serialized}`,
     },
   ];
+}
+
+/** Preserve the complete model turn before recording CRM-owned execution results. */
+export function continueWorkbenchMessages(
+  modelMessages: RuntimeMessage[],
+  observations: Array<{ tool: string; status: "executed" | "rejected" | "failed"; result?: unknown }>,
+): RuntimeMessage[] {
+  return observations.reduce(appendWorkbenchObservation, modelMessages);
 }
 
 /** `ai_agent_run_states.observations` is always a JSON array, including specialist evidence. */

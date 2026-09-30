@@ -20,6 +20,11 @@ describe("workbench job lease fencing", () => {
       "worker-1",
       "2026-09-26 12:00:00.123456+00",
     ]);
+    expect(query.mock.calls[0]?.[0]).toContain("m.status not in ('cancelled','completed')");
+    expect(query.mock.calls[0]?.[0]).toContain("r.status<>'cancelled'");
+    expect(query.mock.calls[0]?.[0]).toContain("a.paused_at is null");
+    expect(query.mock.calls[0]?.[0]).toContain("a.published_version_id=v.id");
+    expect(query.mock.calls[0]?.[0]).toContain("v.status='draft'");
   });
 
   it("rejects a stale claim and a different worker", async () => {

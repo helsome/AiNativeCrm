@@ -200,6 +200,11 @@ export const AUDIT_ACTIONS = [
   "ai_workbench.action_approved",
   "ai_workbench.action_rejected",
   "ai_workbench.action_undone",
+  "ai_mission.complete",
+  "ai_mission.wait_for_customer",
+  "ai_mission.wait_for_internal",
+  "ai_mission.internal_response",
+  "ai_mission.cancel",
   "ai_agent.reconciled",
   "ai_reply.generated",
   "ai_reply.approved",
@@ -789,6 +794,8 @@ export const AUDIT_ACTIONS = [
   "external_db_connection.deleted",
   "external_db_connection.tested",
   "external_db_connection.read",
+  "ai_mission.internal_question_queued",
+  "ai_mission.manager_direction",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */

@@ -5,19 +5,38 @@ import { executePiTurnModelCall } from "@/lib/agent-engine/agent/pi-turn-executi
 import { requestTurnDeps } from "@/lib/agent-engine/agent/request-deps";
 import { getRequestPool } from "@/lib/agent-engine/db/request-pool";
 import { buildMcpTurnTools } from "@/lib/agent-engine/edge/crm/mcp-tools";
-import type { ToolSet } from "@/lib/agent-engine/edge/llm/run-model-call";
+import type { RunModelCallInput, ToolSet } from "@/lib/agent-engine/edge/llm/run-model-call";
 import { appendWorkbenchEvent } from "@/lib/ai/agents/workbench-events";
 import { appendWorkbenchObservation, parseRuntimeMessages } from "@/lib/ai/agents/workbench-state";
 import { executeReversibleLeadUpdate } from "@/lib/ai/agents/reversible-lead-update";
+import {
+  MissionDirectionFenceError, stopMissionRunAfterDirectionFence,
+  withMissionDirectionWriteFence,
+} from "@/lib/ai/agents/mission-direction-fence";
 import { workbenchToolEffect } from "@/lib/ai/agents/tool-effects";
+import {
+  ASK_INTERNAL_COLLEAGUE_TOOL, LIST_INTERNAL_COLLEAGUES_TOOL,
+  createMissionQuestionTools,
+} from "@/lib/ai/agents/internal-question-tools";
+import { canExposeInternalQuestionTools } from "@/lib/ai/agents/internal-question-contract";
 import { resolveWorkbenchScope } from "@/lib/ai/agents/workbench-scope";
 import { runResumedWorkbenchTurn } from "@/lib/ai/agents/run-resumed-workbench-turn";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { assertWorkbenchJobLease } from "@/lib/ai/agents/workbench-job-lease";
-import { selectCollaborationPlan } from "@/lib/ai/agents/collaboration";
+import { collaborationPlanForMission, selectCollaborationPlan } from "@/lib/ai/agents/collaboration";
 import { formatCollaborationContext } from "@/lib/ai/agents/collaboration-runtime";
 import { runWorkbenchCollaboration } from "@/lib/ai/agents/workbench-collaboration";
 import { extractProductFinalAnswer } from "@/lib/ai/agents/final-answer";
+import { MissionBudgetExceededError } from "@/lib/ai/agents/mission-budget";
+import { aggregateWorkbenchLlmUsage, type WorkbenchLlmCallUsage } from "@/lib/ai/agents/workbench-usage";
+import { recoverWorkbenchResult } from "@/lib/ai/agents/workbench-result-recovery";
+import {
+  createWorkbenchResultChannel,
+  resultDocument,
+  SUBMIT_WORKBENCH_RESULT_TOOL,
+  WORKBENCH_RESULT_INSTRUCTION,
+  workbenchResultPartialReason,
+} from "@/lib/ai/agents/workbench-result-submission";
 
 /** Execute a start run from durable CRM state; retries resume the saved Pi messages. */
 export async function runWorkbenchStartJob(
@@ -30,7 +49,7 @@ export async function runWorkbenchStartJob(
   const admin = createAdminClient();
   const { data: run, error } = await admin
     .from("ai_workbench_runs")
-    .select("id, agent_id, actor_user_id, task, mode, status, runtime_state, scope, budget")
+    .select("id, agent_id, mission_id, actor_user_id, task, mode, status, runtime_state, scope, budget")
     .eq("organization_id", job.organization_id)
     .eq("id", runId)
     .maybeSingle();
@@ -46,6 +65,7 @@ export async function runWorkbenchStartJob(
     replyContextRevision?: unknown;
     phase?: unknown;
     collaborationMode?: unknown;
+    directionRevision?: unknown;
   };
   if (typeof runtime.versionId !== "string") throw new Error("workbench_start_version_missing");
   if (run.status === "queued") {
@@ -110,7 +130,9 @@ export async function runWorkbenchStartJob(
       runId,
       jobId: job.id,
       agentId: run.agent_id,
+      missionId: run.mission_id,
       versionId: runtime.versionId,
+      runtimeState: runtime,
       task: run.task,
       mode: run.mode as "inspect" | "act",
       scope,
@@ -240,11 +262,15 @@ export async function runWorkbenchStartJob(
       .eq("id", run.agent_id)
       .maybeSingle();
     if (agentMetadataError) throw new Error("workbench_agent_metadata_read_failed");
-    const collaborationPlan = selectCollaborationPlan({
+    const selectedPlan = selectCollaborationPlan({
       builtinKey: agentMetadata?.builtin_key,
       leadId: scope.leadId,
+      task: run.task,
       disabled: runtime.collaborationMode === "disabled",
     });
+    const collaborationPlan = selectedPlan
+      ? collaborationPlanForMission(selectedPlan, run.mission_id)
+      : null;
     const collaboration = collaborationPlan
       ? await runWorkbenchCollaboration({
           admin,
@@ -277,6 +303,7 @@ export async function runWorkbenchStartJob(
       { readOnly: run.mode === "inspect", workbenchProposalTools: true },
     );
     const proposalInputs: Array<{ tool: string; arguments: unknown }> = [];
+    const resultChannel = createWorkbenchResultChannel();
     let toolResultCount = 0;
     const effectByTool = new Map<string, NonNullable<ReturnType<typeof workbenchToolEffect>>>();
     const gatedTools: Record<string, unknown> = {};
@@ -304,6 +331,22 @@ export async function runWorkbenchStartJob(
         },
       };
     }
+    if (canExposeInternalQuestionTools({ mode: run.mode, missionId: run.mission_id,
+      leadId: scope.leadId, builtinKey: agentMetadata?.builtin_key })) {
+      if (ASK_INTERNAL_COLLEAGUE_TOOL in gatedTools || LIST_INTERNAL_COLLEAGUES_TOOL in gatedTools)
+        throw new Error("mission_question_tool_name_collision");
+      Object.assign(gatedTools, createMissionQuestionTools({
+        pool: getRequestPool(),
+        organizationId: job.organization_id,
+        leadId: scope.leadId!,
+        recordProposal: (args) => proposalInputs.push({ tool: ASK_INTERNAL_COLLEAGUE_TOOL, arguments: args }),
+      }));
+      effectByTool.set(LIST_INTERNAL_COLLEAGUES_TOOL, { effect: "read", resource: "internal_colleagues" });
+      effectByTool.set(ASK_INTERNAL_COLLEAGUE_TOOL, { effect: "external", resource: "internal_questions" });
+    }
+    if (SUBMIT_WORKBENCH_RESULT_TOOL in gatedTools)
+      throw new Error("workbench_result_tool_name_collision");
+    Object.assign(gatedTools, resultChannel.tools);
     const selectedScopeLines = [
       scope.contactId ? `contact_id: ${scope.contactId}` : null,
       scope.leadId ? `lead_id: ${scope.leadId}` : null,
@@ -366,9 +409,8 @@ export async function runWorkbenchStartJob(
       });
       return;
     }
-    const modelResult = await executePiTurnModelCall(
-      { pool: getRequestPool(), llmCfg: deps.llmCfg, log: deps.log, runtime: deps.runtime },
-      {
+    const modelDeps = { pool: getRequestPool(), llmCfg: deps.llmCfg, log: deps.log, runtime: deps.runtime };
+    const modelCallInput = {
         tenantId: job.organization_id,
         jobId: job.id,
         workbenchRunId: runId,
@@ -376,13 +418,14 @@ export async function runWorkbenchStartJob(
         purpose: "agent_turn",
         model: modelAgentConfig.model,
         llmOverride: { provider: modelAgentConfig.provider, credentialId: modelAgentConfig.credentialId },
-        system: `${modelAgentConfig.systemPrompt}\n\nUse CRM tools to verify facts. Follow the run mode and tool policy. Never claim a staged write or external action is complete. 最终报告不超过 2200 个中文字符；优先保留关键事实、冲突、证据缺口和可验证下一步，不复述内部分析过程。`,
+        system: `${modelAgentConfig.systemPrompt}\n\nUse CRM tools to verify facts. Follow the run mode and tool policy. Never claim a staged write or external action is complete.\n${WORKBENCH_RESULT_INSTRUCTION}`,
         messages: resumeMessages ? [] : [{ role: "user", content: taskWithScope }],
         ...(resumeMessages ? { runtimeMessages: resumeMessages as never } : {}),
         tools: gatedTools as ToolSet,
         maxSteps: remainingMaxSteps,
         abortSignal: abortController.signal,
         shouldStopAfterTurn: ({ cumulativeUsage, costCents }) =>
+          resultChannel.submitted() !== null ||
           (remainingTokenBudget !== null && cumulativeUsage.totalTokens >= remainingTokenBudget) ||
           (remainingCostBudget !== null && costCents !== null && costCents >= remainingCostBudget),
         onEvent: async (event) => {
@@ -390,6 +433,7 @@ export async function runWorkbenchStartJob(
         const data = event.data;
         const tool = typeof data.tool_name === "string" ? data.tool_name : undefined;
         const toolCallId = typeof data.tool_call_id === "string" ? data.tool_call_id : undefined;
+        if (tool === SUBMIT_WORKBENCH_RESULT_TOOL) return;
         if (event.type === "tool_execution_start" && tool) {
           const effect = effectByTool.get(tool);
           await appendWorkbenchEvent(admin, {
@@ -416,27 +460,51 @@ export async function runWorkbenchStartJob(
             payload: { toolResultCount },
           });
       },
-      },
-    );
+    } satisfies RunModelCallInput;
+    const firstModelResult = await executePiTurnModelCall(modelDeps, modelCallInput);
     const { error: persistError } = await admin.from("ai_agent_run_states").upsert(
-      { organization_id: job.organization_id, run_id: runId, messages: modelResult.result.runtimeMessages as never },
+      { organization_id: job.organization_id, run_id: runId, messages: firstModelResult.result.runtimeMessages as never },
       { onConflict: "run_id" },
     );
     if (persistError) throw new Error("workbench_runtime_state_persist_failed");
-    const finalAnswer = extractProductFinalAnswer(modelResult.result.text);
+    const recovery = await recoverWorkbenchResult({
+      deps: modelDeps,
+      first: firstModelResult,
+      originalCall: modelCallInput,
+      channel: resultChannel,
+      hasProposedActions: proposalInputs.length > 0,
+      maxRemainingSteps: remainingMaxSteps - firstModelResult.result.turnCount,
+      remainingTokens: remainingTokenBudget,
+      remainingCostCents: remainingCostBudget,
+      beforeSideEffect,
+    });
+    const modelResult = recovery.call;
+    if (modelResult !== firstModelResult) {
+      await beforeSideEffect();
+      const { error: recoveredStateError } = await admin.from("ai_agent_run_states").upsert(
+        { organization_id: job.organization_id, run_id: runId, messages: modelResult.result.runtimeMessages as never },
+        { onConflict: "run_id" },
+      );
+      if (recoveredStateError) throw new Error("workbench_runtime_state_persist_failed");
+    }
+    const submittedResult = resultChannel.submitted();
+    const finalAnswer = submittedResult ? null : extractProductFinalAnswer(modelResult.result.text);
     const answerImpediments = [
-      ...(finalAnswer.inspection.internalDraftCodes.length > 0 && !finalAnswer.sanitized
+      ...(!submittedResult && finalAnswer!.inspection.internalDraftCodes.length > 0 && !finalAnswer!.sanitized
         ? [{ code: "unsafe_internal_draft", message: "内部组织稿无法安全分离。" }]
         : []),
-      ...(finalAnswer.inspection.likelyTruncated
+      ...(!submittedResult && finalAnswer!.inspection.likelyTruncated
         ? [{ code: "answer_likely_truncated", message: "最终答案疑似被截断。" }]
+        : []),
+      ...(!submittedResult
+        ? [{ code: "structured_result_missing", message: "模型未通过结构化提交口交付结果。" }]
         : []),
     ];
     const result = {
       proposals: proposalInputs,
       candidates: [] as Array<{ body: string; trace: Array<{ gate: string; verdict: string; code: string }> }>,
       impediments: answerImpediments as Array<{ code: string; message: string }>,
-      finalText: finalAnswer.text,
+      finalText: submittedResult?.summary ?? finalAnswer!.text,
     };
 
     const { data: latestRun } = await admin
@@ -458,6 +526,7 @@ export async function runWorkbenchStartJob(
           (run.mode === "act" && scope.conversationId ? result.candidates.length : 0),
         candidateReplyCount: result.candidates.length,
         impedimentCount: result.impediments.length,
+        resultRecovery: recovery.state,
       },
     });
     for (const candidate of result.candidates) {
@@ -533,6 +602,11 @@ export async function runWorkbenchStartJob(
               preview: {
                 requiresHumanConfirmation: true,
                 ...(proposal.tool === "send_message" ? { externalEffect: "customer_message" } : {}),
+                ...(proposal.tool === ASK_INTERNAL_COLLEAGUE_TOOL
+                  ? { externalEffect: "feishu_internal_question",
+                      recipientUserId: (proposal.arguments as { recipientUserId: string }).recipientUserId,
+                      question: (proposal.arguments as { question: string }).question }
+                  : {}),
               },
               status: "pending",
             },
@@ -602,10 +676,15 @@ export async function runWorkbenchStartJob(
               payload: { proposalId: saved.id, tool: proposal.tool },
             });
             await beforeSideEffect();
-            reversible = await executeReversibleLeadUpdate({
+            reversible = await withMissionDirectionWriteFence(pool, {
+              organizationId: job.organization_id,
+              missionId: run.mission_id,
+              runId,
+              expectedRevision: runtime.directionRevision,
+            }, () => executeReversibleLeadUpdate({
               args: proposal.arguments,
               tools: mcp.tools as never,
-            });
+            }));
           }
           if (reversible) {
             const { error: updateError } = await admin
@@ -716,7 +795,9 @@ export async function runWorkbenchStartJob(
           runId,
           jobId: job.id,
           agentId: run.agent_id,
+          missionId: run.mission_id,
           versionId: runtime.versionId,
+          runtimeState: { ...runtime, phase: "resume" },
           task: run.task,
           mode: "act",
           scope,
@@ -738,9 +819,19 @@ export async function runWorkbenchStartJob(
       (item) => item.code === "unsafe_internal_draft" || item.code === "answer_likely_truncated",
     );
     const emptyFinalAnswer = !finalText.trim();
+    const partialReason = workbenchResultPartialReason({
+      finalText,
+      submission: submittedResult,
+      answerInvalidCode: answerInvalid
+        ? result.impediments.find((item) =>
+            ["unsafe_internal_draft", "answer_likely_truncated"].includes(item.code),
+          )?.code ?? "answer_invalid"
+        : null,
+      budgetExhausted: exhausted,
+    });
     const status = pending
       ? "awaiting_confirmation"
-      : exhausted || answerInvalid || emptyFinalAnswer
+      : partialReason
         ? "partial"
         : "completed";
     await beforeSideEffect();
@@ -749,6 +840,7 @@ export async function runWorkbenchStartJob(
       .update({
         status,
         final_text: finalText || null,
+        result_document: submittedResult ? resultDocument(submittedResult) : null,
         runtime_state: {
           ...runtime,
           proposals: lastSequence,
@@ -757,16 +849,7 @@ export async function runWorkbenchStartJob(
             ...(emptyFinalAnswer && !exhausted ? ["empty_final_answer"] : []),
           ],
         },
-        error_code:
-          status === "partial"
-            ? emptyFinalAnswer
-              ? "empty_final_answer"
-              : answerInvalid
-                ? result.impediments.find((item) =>
-                    ["unsafe_internal_draft", "answer_likely_truncated"].includes(item.code),
-                  )?.code ?? null
-                : null
-            : null,
+        error_code: status === "partial" ? partialReason : null,
         ...(pending ? {} : { completed_at: new Date().toISOString() }),
       })
       .eq("organization_id", job.organization_id)
@@ -783,40 +866,22 @@ export async function runWorkbenchStartJob(
           hasAnswer: !emptyFinalAnswer,
           ...(status === "partial"
             ? {
-                reason: emptyFinalAnswer
-                  ? "empty_final_answer"
-                  : answerInvalid
-                    ? result.impediments.find((item) =>
-                        ["unsafe_internal_draft", "answer_likely_truncated"].includes(item.code),
-                      )?.code
-                    : "budget_exhausted",
+                reason: partialReason,
               }
             : {}),
           proposalCount: proposalRows.length,
         },
       });
-    const { rows: usageRows } = await getRequestPool().query<{
-      input_tokens: number | null;
-      output_tokens: number | null;
-      cost_cents: number | null;
-    }>(
-      "select input_tokens, output_tokens, cost_cents from llm_calls where organization_id=$1 and job_id=$2",
+    const { rows: usageRows } = await getRequestPool().query<WorkbenchLlmCallUsage>(
+      "select input_tokens, output_tokens, cost_cents, status from llm_calls where organization_id=$1 and job_id=$2",
       [job.organization_id, job.id],
     );
-    const usage = usageRows.reduce(
-      (sum, row) => ({
-        inputTokens: sum.inputTokens + (row.input_tokens ?? 0),
-        outputTokens: sum.outputTokens + (row.output_tokens ?? 0),
-        costCents: sum.costCents + Number(row.cost_cents ?? 0),
-        calls: sum.calls + 1,
-      }),
-      { inputTokens: 0, outputTokens: 0, costCents: 0, calls: 0 },
-    );
+    const usage = aggregateWorkbenchLlmUsage(usageRows);
     await appendWorkbenchEvent(admin, {
       organizationId: job.organization_id,
       runId,
       type: "usage_reported",
-      payload: usage,
+      payload: { ...usage },
     });
   } catch (error) {
     const { data: latest } = await admin
@@ -826,6 +891,29 @@ export async function runWorkbenchStartJob(
       .eq("id", runId)
       .maybeSingle();
     if (latest?.status === "cancelled") return;
+    if (error instanceof MissionDirectionFenceError && run.mission_id) {
+      if (latest?.status !== "queued" && latest?.status !== "running") return;
+      await beforeSideEffect();
+      await stopMissionRunAfterDirectionFence(pool, {
+        organizationId: job.organization_id,
+        missionId: run.mission_id,
+        runId,
+      }, error);
+      return;
+    }
+    if (error instanceof MissionBudgetExceededError) {
+      await beforeSideEffect();
+      const code = error.message;
+      await admin.from("ai_workbench_runs")
+        .update({ status: "partial", error_code: code, completed_at: new Date().toISOString() })
+        .eq("organization_id", job.organization_id).eq("id", runId)
+        .in("status", ["queued", "running"]);
+      await appendWorkbenchEvent(admin, {
+        organizationId: job.organization_id, runId,
+        type: "run_partial", payload: { status: "partial", reason: code },
+      });
+      return;
+    }
     if (job.attempts >= job.max_attempts) {
       await beforeSideEffect();
       const reason = error instanceof Error ? error.name : "runtime_error";

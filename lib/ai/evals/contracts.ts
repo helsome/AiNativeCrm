@@ -28,6 +28,7 @@ export interface AgentEvalProfile {
 }
 
 export interface AgentEvalEvent {
+  id?: string;
   sequence: number;
   eventType: string;
   payload: Record<string, unknown>;
@@ -46,6 +47,8 @@ export interface AgentEvalRunInput {
   mode: "inspect" | "act";
   status: string;
   finalText: string | null;
+  /** Untrusted model submission; deterministic checks parse it before use. */
+  resultDocument?: unknown;
   events: AgentEvalEvent[];
   proposals: AgentEvalProposal[];
   /** Service-only execution state. Reports never expose these raw messages. */

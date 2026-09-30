@@ -32,6 +32,7 @@ const EVENT_FIELDS: Record<CrmAgentEventType, readonly string[]> = {
     "proposedToolCount",
     "candidateReplyCount",
     "impedimentCount",
+    "resultRecovery",
   ],
   tool_proposed: ["proposalId", "tool"],
   policy_checked: ["proposalId", "decision", "tool", "gate", "verdict", "code"],
@@ -115,7 +116,11 @@ export function redactEventPayload(
       return Object.fromEntries(
         Object.entries(item).map(([key, nested]) => [
           key,
-          secretKey.test(key) ? "[REDACTED]" : visit(nested),
+          secretKey.test(key) && !(
+            type === "usage_reported" &&
+            (key === "inputTokens" || key === "outputTokens") &&
+            typeof nested === "number" && Number.isFinite(nested) && nested >= 0
+          ) ? "[REDACTED]" : visit(nested),
         ]),
       );
     }

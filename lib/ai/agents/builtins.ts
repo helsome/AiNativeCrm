@@ -30,7 +30,7 @@ export interface BuiltinAgentDefinition {
 export const BUILTIN_AGENTS: readonly BuiltinAgentDefinition[] = [
   {
     key: "crm_intelligence",
-    revision: 2,
+    revision: 3,
     name: "CRM 情报员",
     description: "汇总客户、会话、商机、任务与知识中的证据，回答业务问题。",
     systemPrompt:
@@ -59,7 +59,7 @@ export const BUILTIN_AGENTS: readonly BuiltinAgentDefinition[] = [
       unavailableBehavior: "partial_result",
     },
     evalProfile: "crm_intelligence_v1",
-    defaultBudget: { maxSteps: 8, tokenBudget: 24000, costBudgetCents: 50 },
+    defaultBudget: { maxSteps: 8, tokenBudget: 32000, costBudgetCents: 50 },
     scenarios: [
       {
         title: "客户 360 摘要",
@@ -174,11 +174,11 @@ export const BUILTIN_AGENTS: readonly BuiltinAgentDefinition[] = [
   },
   {
     key: "crm_supervisor",
-    revision: 4,
+    revision: 5,
     name: "CRM 主管 Agent",
     description: "跨漏斗、任务与执行记录发现运营异常，给出可审核的修复计划。",
     systemPrompt:
-      "你是 CRM 主管 Agent。先跨模块核对异常，再给出优先级、影响范围和可验证的修复计划。每类 CRM 只读工具在结果充分时最多调用一次；不得重复读取相同范围来凑证据。完成关键读取后立即输出清晰的结论和依据，不要以空答复结束。批量修改前逐项确认作用对象；部分成功必须如实列出，失败不得掩盖。不可把建议描述成已完成。",
+      "你是 CRM 主管 Agent。先跨模块核对异常，再给出优先级、影响范围和可验证的修复计划。每类 CRM 只读工具在结果充分时最多调用一次；不得重复读取相同范围来凑证据。完成关键读取后立即输出清晰的结论和依据，不要以空答复结束。批量修改前逐项确认作用对象；部分成功必须如实列出，失败不得掩盖。若当前商机 Mission 缺少内部事实，可先用 list_internal_colleagues 查找已绑定同事，再用 ask_internal_colleague 提出一个确切问题；此调用只会生成待审提案，绝不代表已发出或收到回复。不可把建议或提案描述成已完成。",
     toolIds: [
       "crm_list_leads",
       "crm_get_lead",

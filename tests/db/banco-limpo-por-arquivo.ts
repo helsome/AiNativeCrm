@@ -54,12 +54,17 @@ if (!container || !template) {
       "`pnpm test:db` (scripts/test-db.sh), que sobe o Postgres efêmero e aplica o baseline no molde.",
   );
 }
+if (!/^[a-z][a-z0-9_]*$/.test(template)) throw new Error("invalid_test_db_template_name");
 
 execFileSync(
   "docker",
   ["exec", "-i", container, "psql", "-U", "postgres", "-d", "template1", "-qtA", "-v", "ON_ERROR_STOP=1", "-f", "-"],
   {
-    input: `drop database if exists postgres with (force);\ncreate database postgres template ${template};\n`,
+    input: `alter database ${template} with allow_connections false;\n` +
+      `select pg_terminate_backend(pid) from pg_stat_activity where datname='${template}';\n` +
+      `drop database if exists postgres with (force);\n` +
+      `create database postgres template ${template};\n` +
+      `alter database ${template} with allow_connections true;\n`,
     encoding: "utf8",
   },
 );

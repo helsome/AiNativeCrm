@@ -6,6 +6,8 @@ import { appendWorkbenchEvent } from "@/lib/ai/agents/workbench-events";
 import { BUILTIN_AGENTS } from "@/lib/ai/agents/builtins";
 import { ensureBuiltinAgents } from "@/lib/ai/agents/ensure-builtins";
 import { resolveWorkbenchScope } from "@/lib/ai/agents/workbench-scope";
+import { loadMissionContinuationAgent } from "@/lib/ai/agents/mission-continuation-agent";
+import { missionAcceptanceContractSchema } from "@/lib/ai/evals/mission-acceptance-contract";
 import { requireRole } from "@/lib/auth/require-role";
 import { requireSupportWrite } from "@/lib/impersonate/support";
 import { enqueueJob } from "@/lib/agent-engine/queue/queue";
@@ -25,6 +27,12 @@ const startSchema = z
     task: z.string().trim().min(1).max(8000),
     mode: z.enum(["inspect", "act"]),
     collaboration: z.enum(["auto", "disabled"]).optional().default("auto"),
+    mission: z.object({
+      goal: z.string().trim().min(1).max(8000),
+      acceptanceCriteria: z.string().trim().min(1).max(4000),
+      acceptanceContract: missionAcceptanceContractSchema.optional(),
+      deadlineAt: z.string().datetime({ offset: true }).optional(),
+    }).strict().optional(),
     scope: z
       .object({
         contactId: z.string().uuid().optional(),
@@ -43,7 +51,7 @@ export async function GET(): Promise<Response> {
   if (!authz.ok) return authz.response;
   const { data, error } = await createAdminClient()
     .from("ai_workbench_runs")
-    .select("id, agent_id, task, mode, status, final_text, error_code, created_at, completed_at")
+    .select("id, agent_id, mission_id, task, mode, status, final_text, error_code, created_at, completed_at")
     .eq("organization_id", authz.org.orgId)
     .eq("run_kind", "root")
     .order("created_at", { ascending: false })
@@ -180,17 +188,60 @@ export async function POST(req: NextRequest): Promise<Response> {
   } catch {
     return fail("scope_not_found", "所选 CRM 对象不存在或不属于当前组织。", 422, { requestId });
   }
+  if (parsed.data.mission && (parsed.data.mode !== "act" || !resolvedScope.leadId))
+    return fail("mission_scope_required", "委托业务任务需要 act 模式和当前组织的商机。", 422, {
+      requestId,
+    });
+  let missionAgentRevision: number | null = null;
+  if (parsed.data.mission) {
+    try {
+      const continuationAgent = await loadMissionContinuationAgent(
+        getRequestPool(), org.orgId, agent.id, version.id,
+      );
+      if (!continuationAgent)
+        return fail(
+          "mission_agent_not_eligible",
+          "持续业务任务需要未暂停的自动 Agent；用户 Agent 必须发布当前版本，内置 Agent 使用锁定版本。",
+          422,
+          { requestId },
+        );
+      missionAgentRevision = continuationAgent.operationRevision;
+    } catch {
+      return fail("mission_agent_unavailable", "无法核对 Agent 的持续运行资格。", 503, { requestId });
+    }
+  }
 
-  const runId = randomUUID();
   const budget = definition?.defaultBudget ?? {
     maxSteps: version.max_steps,
     tokenBudget: version.token_budget,
     costBudgetCents: version.cost_budget_cents,
   };
+  const runId = randomUUID();
+  const missionId = parsed.data.mission ? randomUUID() : null;
+  if (missionId && parsed.data.mission && resolvedScope.leadId) {
+    const { error: missionError } = await admin.from("ai_missions").insert({
+      id: missionId,
+      organization_id: org.orgId,
+      lead_id: resolvedScope.leadId,
+      actor_user_id: user.id,
+      goal: parsed.data.mission.goal,
+      acceptance_criteria: parsed.data.mission.acceptanceCriteria,
+      acceptance_contract: parsed.data.mission.acceptanceContract ?? null,
+      deadline_at: parsed.data.mission.deadlineAt ?? null,
+      max_total_tokens: Math.min(1_000_000, Math.max(1_000, 2 * (budget.tokenBudget ?? 36_000))),
+      max_total_cost_cents: Math.min(100_000, Math.max(1, 2 * (budget.costBudgetCents ?? 75))),
+      status: "queued",
+    });
+    if (missionError)
+      return missionError.code === "23505"
+        ? fail("mission_active_exists", "这个商机已有进行中的业务任务，请先处理现有任务。", 409, { requestId })
+        : fail("mission_create_failed", "无法持久化商机任务。", 500, { requestId });
+  }
   const { error: insertError } = await admin.from("ai_workbench_runs").insert({
     id: runId,
     organization_id: org.orgId,
     agent_id: agent.id,
+    mission_id: missionId,
     actor_user_id: user.id,
     task: parsed.data.task,
     mode: parsed.data.mode,
@@ -201,11 +252,18 @@ export async function POST(req: NextRequest): Promise<Response> {
       versionId: version.id,
       runner: "pi_crm_preview",
       replyContextRevision: resolvedScope.replyContextRevision,
-      agentOperationRevision: agent.operation_revision,
+      agentOperationRevision: missionAgentRevision ?? agent.operation_revision,
       collaborationMode: parsed.data.collaboration,
+      ...(missionId ? { directionRevision: 0 } : {}),
     },
   });
-  if (insertError) return fail("run_create_failed", "无法持久化工作台运行。", 500, { requestId });
+  if (insertError) {
+    if (missionId)
+      await admin.from("ai_missions")
+        .update({ status: "needs_review", blocked_reason: "run_create_failed" })
+        .eq("organization_id", org.orgId).eq("id", missionId);
+    return fail("run_create_failed", "无法持久化工作台运行。", 500, { requestId });
+  }
   try {
     await appendWorkbenchEvent(admin, {
       organizationId: org.orgId,
@@ -258,5 +316,5 @@ export async function POST(req: NextRequest): Promise<Response> {
     });
     return fail("start_queue_unavailable", "运行已保存，但任务队列暂不可用。", 503, { requestId });
   }
-  return ok({ run_id: runId, status: "queued" }, { status: 201, requestId });
+  return ok({ run_id: runId, mission_id: missionId, status: "queued" }, { status: 201, requestId });
 }

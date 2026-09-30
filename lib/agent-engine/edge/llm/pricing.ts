@@ -61,6 +61,19 @@ const USD_PER_MTOK: Record<string, Preco> = {
   'claude-opus-4': { input: 15, output: 75, cacheRead: 1.5, cacheWrite5m: 18.75, cacheWrite1h: 30 },
 };
 
+/**
+ * OpenCode Zen lists this exact model as free for a limited time (checked
+ * 2026-09-29): https://opencode.ai/docs/en/zen/ . Scope the exception to the
+ * provider as well as the model; another gateway may bill for the same id.
+ * The offer is time-limited without a published end date. Expire this local
+ * price verification after one week; unknown pricing then fails closed in
+ * per-run cost budgets until the provider price has been checked again.
+ */
+const OPENCODE_FREE_PRICE_VERIFIED_UNTIL = Date.parse('2026-10-06T00:00:00Z');
+const OPENCODE_FREE_MODELS: Record<string, Preco> = {
+  'space-bunny-free': { input: 0, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 },
+};
+
 export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
@@ -74,7 +87,10 @@ export interface TokenUsage {
  * Exportada para o teste poder provar o que a tabela recusa — é o caso que o
  * `startsWith` antigo deixava passar silenciosamente.
  */
-export function precoDoModelo(model: string): Preco | undefined {
+export function precoDoModelo(model: string, provider?: string, asOf = new Date()): Preco | undefined {
+  if (provider === 'opencode') {
+    return asOf.getTime() < OPENCODE_FREE_PRICE_VERIFIED_UNTIL ? OPENCODE_FREE_MODELS[model] : undefined;
+  }
   return USD_PER_MTOK[model] ?? USD_PER_MTOK[model.replace(/-\d{8}$/, '')];
 }
 
@@ -86,8 +102,8 @@ export function precoDoModelo(model: string): Preco | undefined {
  * `cacheTtl` é o TTL com que o prefixo estável foi gravado (knob `LLM_CACHE_TTL`);
  * o default repete a doutrina ('1h') para quem chama sem ele.
  */
-export function costCents(model: string, usage: TokenUsage, cacheTtl: CacheTtl = '1h'): number | null {
-  const p = precoDoModelo(model);
+export function costCents(model: string, usage: TokenUsage, cacheTtl: CacheTtl = '1h', provider?: string, asOf = new Date()): number | null {
+  const p = precoDoModelo(model, provider, asOf);
   if (p === undefined) {
     return null;
   }

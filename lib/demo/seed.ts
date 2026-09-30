@@ -282,10 +282,12 @@ async function ensureBoard(
       created_by: userId,
     };
     if (found) {
-      const { error } = await admin.from("crm_tasks").update(payload as never).eq("id", (found as Row).id);
+      const { error } = await admin.from("crm_tasks").update(payload as never)
+        .eq("organization_id", orgId).eq("id", (found as Row).id);
       if (error) throw new Error(`无法更新演示任务：${error.message}`);
     } else {
-      const { error } = await admin.from("crm_tasks").insert(payload as never);
+      const { error } = await admin.from("crm_tasks")
+        .insert({ ...payload, organization_id: orgId } as never);
       if (error) throw new Error(`无法创建演示任务：${error.message}`);
     }
   }

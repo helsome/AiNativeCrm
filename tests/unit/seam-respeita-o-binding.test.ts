@@ -99,6 +99,26 @@ async function rodar(opts: Parameters<typeof poolFalso>[0] & { purpose: string; 
 }
 
 describe("o seam usa o modelo que o painel escolheu", () => {
+  it("passes the CRM steering source to the runtime without reading it in the gateway", async () => {
+    const { pool } = poolFalso({ binding: null });
+    const poll = vi.fn(async () => [{ id: "direction-1", content: "new CRM direction" }]);
+    const run = vi.fn(async () => ({
+      messages: [{ role: "user", content: "hello" }, { role: "assistant", content: "ok" }],
+      finalText: "ok",
+      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0,
+        cacheWriteTokens: 0, totalTokens: 0 },
+      events: [], toolCalls: [],
+    }));
+    await runModelCall(pool, cfg, {
+      tenantId: ORG, purpose: "agent_turn", messages: [{ role: "user", content: "hello" }],
+      steering: { poll },
+    }, { runtime: { run } as never });
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({
+      steering: { poll },
+    }));
+    expect(poll).not.toHaveBeenCalled();
+  });
+
   it("sem binding, nada muda — segue o padrão da organização", () => {
     // A recíproca de tudo abaixo. Sem ela, um seam que ignorasse o painel por
     // completo passaria neste arquivo inteiro se os outros testes fossem

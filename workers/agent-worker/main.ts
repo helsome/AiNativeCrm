@@ -84,6 +84,17 @@ import { createCaseReplyTurnHandler } from "@/lib/agent-engine/agent/case-reply-
 import { createOperatorTurnHandler } from "@/lib/agent-engine/agent/operator-turn";
 import { runWorkbenchResumeJob } from "@/lib/ai/agents/workbench-resume-job";
 import { runWorkbenchStartJob } from "@/lib/ai/agents/workbench-start-job";
+import { runMissionDeadlineLoop } from "@/lib/ai/agents/mission-deadlines";
+import {
+  expireFeishuInboxPayloads,
+  reconcileDeadFeishuInboxJobs,
+  runFeishuInboxJob,
+} from "@/lib/ai/internal-collaboration/feishu-inbox-job";
+import {
+  expireFeishuQuestionPayloads,
+  reconcileDeadFeishuQuestionJobs,
+  runFeishuQuestionJob,
+} from "@/lib/ai/internal-collaboration/feishu-question-job";
 import { appendWorkbenchEvent } from "@/lib/ai/agents/workbench-events";
 import { completeTurnForEnrollment, createPgAdminClient } from "@/lib/followup/turn-bridge";
 import { seedPlatformPlaybook } from "@/lib/agent-engine/agent/playbook-seed";
@@ -285,6 +296,10 @@ export async function startWorker(
   if (bootReap.revived + bootReap.dead > 0) {
     log.warn("órfãos soltos no boot", bootReap);
   }
+  await reconcileDeadFeishuInboxJobs(pool);
+  await expireFeishuInboxPayloads(pool);
+  await reconcileDeadFeishuQuestionJobs(pool);
+  await expireFeishuQuestionPayloads(pool);
 
   // O comportamento da INSTALAÇÃO entra no processo ANTES dos laços que
   // consomem turnos: a releitura abaixo só acontece no primeiro tique do reaper
@@ -314,8 +329,12 @@ export async function startWorker(
       log.error("comportamento da instalação: releitura falhou", { error: errMsg(err) }),
     );
     reapExpiredJobs(pool, { visibilityTimeoutMs: env.QUEUE_VISIBILITY_TIMEOUT_MS })
-      .then((reaped) => {
+      .then(async (reaped) => {
         if (reaped.revived + reaped.dead > 0) log.warn("reaper devolveu jobs órfãos", reaped);
+        await reconcileDeadFeishuInboxJobs(pool);
+        await expireFeishuInboxPayloads(pool);
+        await reconcileDeadFeishuQuestionJobs(pool);
+        await expireFeishuQuestionPayloads(pool);
       })
       .catch((err: unknown) => log.error("reaper falhou", { error: errMsg(err) }));
   }, env.QUEUE_REAPER_INTERVAL_MS);
@@ -441,6 +460,7 @@ export async function startWorker(
     log,
     loopsAbort.signal,
   );
+  const missionDeadlineLoop = runMissionDeadlineLoop(pool, log, loopsAbort.signal);
 
   const cacheAlertKnobs: CacheAlertKnobs = {
     windowMs: env.METRICS_WINDOW_MS,
@@ -528,6 +548,10 @@ export async function startWorker(
         const settled = terminal
           ? await cancelJob(pool, job.id, workerId, errMsg(err), claimOfJob(job)?.acquired_at)
           : await failJob(pool, job.id, workerId, err, claimOfJob(job)?.acquired_at);
+        if (settled?.status === "dead" && job.kind === "internal_im_event")
+          await reconcileDeadFeishuInboxJobs(pool);
+        if (settled?.status === "dead" && job.kind === "internal_im_question")
+          await reconcileDeadFeishuQuestionJobs(pool);
         if (
           settled?.status === "dead" &&
           (job.kind === "workbench_start" || job.kind === "workbench_resume") &&
@@ -612,6 +636,7 @@ export async function startWorker(
       eventLogLoop,
       healthLoop,
       cronLoop,
+      missionDeadlineLoop,
       sessionWatchdogLoop,
       flywheelLoop,
       voiceCallsBridgeLoop,
@@ -717,6 +742,8 @@ export async function main(): Promise<void> {
   handlers.set("workbench_start", async (job, pool, { workerId }) =>
     runWorkbenchStartJob(job, pool, workerId),
   );
+  handlers.set("internal_im_event", (job, pool) => runFeishuInboxJob(job, pool));
+  handlers.set("internal_im_question", (job, pool) => runFeishuQuestionJob(job, pool));
   await startWorker(env, handlers, log);
 }
 

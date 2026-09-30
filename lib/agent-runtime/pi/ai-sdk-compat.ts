@@ -239,6 +239,7 @@ export interface PiAiSdkCallInput {
   transformContext?: AgentTurnInput["transformContext"];
   beforeToolCall?: AgentTurnInput["beforeToolCall"];
   afterToolCall?: AgentTurnInput["afterToolCall"];
+  steering?: AgentTurnInput["steering"];
   shouldStopAfterTurn?: AgentTurnInput["shouldStopAfterTurn"];
   onEvent?: (event: AgentRuntimeEvent) => void | Promise<void>;
 }
@@ -276,6 +277,7 @@ export async function runPiAiSdkCall(input: PiAiSdkCallInput) {
         ? { beforeToolCall: input.beforeToolCall }
         : {}),
     ...(input.afterToolCall ? { afterToolCall: input.afterToolCall } : {}),
+    ...(input.steering ? { steering: input.steering } : {}),
     ...(input.onEvent ? { onEvent: input.onEvent } : {}),
     ...(input.shouldStopAfterTurn ? { shouldStopAfterTurn: input.shouldStopAfterTurn } : {}),
   });

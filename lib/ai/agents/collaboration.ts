@@ -143,6 +143,16 @@ export const OPPORTUNITY_REVIEW_PLAN: AgentCollaborationPlan = {
   ],
 };
 
+/** A Mission shares one cumulative budget across all of its model calls.
+ * Run specialists in sequence so sibling calls cannot all pass a stale
+ * preflight balance at the same time. Standalone reviews stay parallel. */
+export function collaborationPlanForMission(
+  plan: AgentCollaborationPlan,
+  missionId: string | null,
+): AgentCollaborationPlan {
+  return missionId ? { ...plan, maxParallel: 1 } : plan;
+}
+
 export function validateCollaborationPlan(plan: AgentCollaborationPlan): string[] {
   const errors: string[] = [];
   if (plan.maxParallel < 1 || plan.maxParallel > plan.specialists.length)
@@ -163,10 +173,17 @@ export function validateCollaborationPlan(plan: AgentCollaborationPlan): string[
 export function selectCollaborationPlan(input: {
   builtinKey?: string | null;
   leadId?: string | null;
+  task?: string | null;
   disabled?: boolean;
 }): AgentCollaborationPlan | null {
   if (input.disabled || !input.leadId) return null;
   if (input.builtinKey !== "sales_operations" && input.builtinKey !== "crm_supervisor")
     return null;
+  // Simple, bounded CRM edits do not need three evidence specialists. If the
+  // same task asks for diagnosis or evidence, preserve the collaborative path.
+  const task = input.task?.trim() ?? "";
+  const asksForDirectEdit = /补一条|新增|创建|安排|添加|更新|修改|移动|改为|改到|\b(?:add|create|schedule|update|move)\b/i.test(task);
+  const asksForInvestigation = /复盘|分析|原因|风险|依据|核对|调查|为什么|为何|诊断|评估|compare|review|investigate|why|evidence/i.test(task);
+  if (asksForDirectEdit && !asksForInvestigation) return null;
   return OPPORTUNITY_REVIEW_PLAN;
 }

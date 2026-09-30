@@ -1,5 +1,6 @@
 import type { AgentEvalRunInput, AgentEvalVerdict } from "@/lib/ai/evals/contracts";
 import type { BuiltinEvalProfileKey } from "@/lib/ai/evals/profiles";
+import { resultDocument } from "@/lib/ai/agents/workbench-result-submission";
 
 export interface WorkbenchEvalGoldenCase {
   id: string;
@@ -56,6 +57,82 @@ function base(over: Partial<AgentEvalRunInput> = {}): AgentEvalRunInput {
 }
 
 export const WORKBENCH_EVAL_GOLDEN_CASES: readonly WorkbenchEvalGoldenCase[] = [
+  {
+    id: "real-structured-result-observed-sources-not-claim-proof",
+    provenance: {
+      kind: "real_run",
+      runId: "dc458785-58fc-4503-a762-96efe02e00ec",
+      capturedAt: "2026-09-29T15:09:23Z",
+      note: "真实 OpenCode CRM 只读运行；只保留已核对的对象 ID 与脱敏字段，不复制客户正文。",
+    },
+    profileKey: "crm_intelligence_v1",
+    input: base({
+      runId: "dc458785-58fc-4503-a762-96efe02e00ec",
+      status: "partial",
+      finalText: "已核对联系人、商机和会话；部分信息仍需人工确认。",
+      resultDocument: resultDocument({
+        summary: "已核对联系人、商机和会话；部分信息仍需人工确认。",
+        evidence: [
+          { sourceType: "contact", sourceId: "6842302c-a864-4a4e-8dc5-a605f6c10827", claim: "联系人已读取" },
+          { sourceType: "lead", sourceId: "84598184-e361-4faa-ad1e-ae5525e85323", claim: "商机已读取" },
+          { sourceType: "conversation", sourceId: "761207e2-a792-4b75-b347-819d8c1a54fb", claim: "会话已读取" },
+        ],
+        missingInformation: ["会话完整历史未核实"],
+        nextStep: "由人工核对会话历史",
+        wakeCondition: "none",
+      }),
+      runtimeMessages: [
+        { role: "tool", toolCallId: "read-contact", toolName: "crm_get_contact",
+          content: JSON.stringify({ id: "6842302c-a864-4a4e-8dc5-a605f6c10827" }) },
+        { role: "tool", toolCallId: "read-lead", toolName: "crm_get_lead",
+          content: JSON.stringify({ lead: { id: "84598184-e361-4faa-ad1e-ae5525e85323" } }) },
+        { role: "tool", toolCallId: "list-conversations", toolName: "crm_list_conversations",
+          content: JSON.stringify({ conversations: [{ id: "761207e2-a792-4b75-b347-819d8c1a54fb" }] }) },
+      ],
+    }),
+    expected: {
+      verdict: "needs_review",
+      findingCodes: ["partial_result", "structured_claims_not_independently_verified", "structured_result_missing_material"],
+    },
+  },
+  {
+    id: "structured-result-unobserved-source",
+    provenance: { kind: "synthetic_regression", note: "合法 UUID 但没有来自本次成功工具观察的引用必须失败。" },
+    profileKey: "crm_intelligence_v1",
+    input: base({
+      resultDocument: resultDocument({
+        summary: "商机已核对。",
+        evidence: [{ sourceType: "lead", sourceId: "84598184-e361-4faa-ad1e-ae5525e85323", claim: "商机已成交" }],
+        missingInformation: [], nextStep: "继续跟进", wakeCondition: "none",
+      }),
+    }),
+    expected: { verdict: "fail", findingCodes: ["structured_result_unobserved_evidence"] },
+  },
+  {
+    id: "structured-result-field-contradicts-observation",
+    provenance: {
+      kind: "synthetic_regression",
+      note: "模型引用真实商机但把工具观察到的 open 状态声明为 won；字段断言必须失败。",
+    },
+    profileKey: "crm_intelligence_v1",
+    input: base({
+      resultDocument: resultDocument({
+        summary: "商机已成交。",
+        evidence: [{
+          sourceType: "lead",
+          sourceId: "84598184-e361-4faa-ad1e-ae5525e85323",
+          claim: "商机已成交",
+          assertions: [{ field: "status", equals: "won" }],
+        }],
+        missingInformation: [], nextStep: "核对成交", wakeCondition: "none",
+      }),
+      runtimeMessages: [{
+        role: "tool", toolCallId: "read-lead", toolName: "crm_get_lead",
+        content: JSON.stringify({ lead: { id: "84598184-e361-4faa-ad1e-ae5525e85323", status: "open" } }),
+      }],
+    }),
+    expected: { verdict: "fail", findingCodes: ["structured_fact_assertion_mismatch"] },
+  },
   {
     id: "real-multi-agent-missing-wiki",
     provenance: {

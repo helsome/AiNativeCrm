@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentEvalRunInput } from "@/lib/ai/evals/contracts";
 import { evaluateAgentRun } from "@/lib/ai/evals/evaluate-run";
 import { resolveAgentEvalProfile } from "@/lib/ai/evals/profiles";
+import { resultDocument } from "@/lib/ai/agents/workbench-result-submission";
 
 function run(over: Partial<AgentEvalRunInput> = {}): AgentEvalRunInput {
   return {
@@ -47,6 +48,123 @@ describe("deterministic Agent run evaluation", () => {
       groundedEvidenceItems: 2,
     });
     expect(report.semanticJudge.status).toBe("not_configured");
+  });
+
+  it("does not grade a model-declared evidence gap as a complete answer", () => {
+    const report = evaluateAgentRun(run({
+      resultDocument: resultDocument({
+        summary: "交期尚待核对",
+        evidence: [],
+        missingInformation: ["可承诺交期"],
+        nextStep: "找交付同事确认",
+        wakeCondition: "internal_response",
+      }),
+    }), resolveAgentEvalProfile("crm_intelligence_v1"));
+    expect(report.verdict).toBe("needs_review");
+    expect(report.dimensions.find((item) => item.key === "answer_quality")?.findings)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: "structured_result_missing_material" }),
+      ]));
+  });
+
+  it("fails a structured result that cites a record never observed in this run", () => {
+    const report = evaluateAgentRun(run({
+      resultDocument: resultDocument({
+        summary: "已核对商机",
+        evidence: [{
+          sourceType: "lead",
+          sourceId: "84598184-e361-4faa-ad1e-ae5525e85323",
+          claim: "商机已成交",
+        }],
+        missingInformation: [], nextStep: "继续跟进", wakeCondition: "none",
+      }),
+    }), resolveAgentEvalProfile("crm_intelligence_v1"));
+    expect(report.verdict).toBe("fail");
+    expect(report.dimensions.find((item) => item.key === "answer_quality")?.findings)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: "structured_result_unobserved_evidence" }),
+      ]));
+  });
+
+  it("keeps observed citations at needs_review until their claim text is independently checked", () => {
+    const sourceId = "84598184-e361-4faa-ad1e-ae5525e85323";
+    const report = evaluateAgentRun(run({
+      resultDocument: resultDocument({
+        summary: "已核对商机",
+        evidence: [{ sourceType: "lead", sourceId, claim: "商机已成交" }],
+        missingInformation: [], nextStep: "继续跟进", wakeCondition: "none",
+      }),
+      runtimeMessages: [
+        ...run().runtimeMessages,
+        { role: "tool", toolCallId: "read-lead", toolName: "crm_get_lead",
+          content: JSON.stringify({ lead: { id: sourceId, status: "open" } }) },
+      ],
+    }), resolveAgentEvalProfile("crm_intelligence_v1"));
+    expect(report.verdict).toBe("needs_review");
+    expect(report.dimensions.find((item) => item.key === "answer_quality")?.findings)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: "structured_claims_not_independently_verified" }),
+      ]));
+  });
+
+  it("fails a submitted CRM field assertion that contradicts the observed value", () => {
+    const sourceId = "84598184-e361-4faa-ad1e-ae5525e85323";
+    const report = evaluateAgentRun(run({
+      resultDocument: resultDocument({
+        summary: "商机已成交",
+        evidence: [{ sourceType: "lead", sourceId, claim: "商机已成交",
+          assertions: [{ field: "status", equals: "won" }] }],
+        missingInformation: [], nextStep: "核对成交", wakeCondition: "none",
+      }),
+      runtimeMessages: [
+        { role: "tool", toolCallId: "read-lead", toolName: "crm_get_lead",
+          content: JSON.stringify({ lead: { id: sourceId, status: "open" } }) },
+      ],
+    }), resolveAgentEvalProfile("crm_intelligence_v1"));
+    expect(report.verdict).toBe("fail");
+    expect(report.dimensions.find((item) => item.key === "answer_quality")?.findings)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          code: "structured_fact_assertion_mismatch",
+          evidence: { mismatched: 1 },
+        }),
+      ]));
+    expect(JSON.stringify(report)).not.toContain(sourceId);
+    expect(JSON.stringify(report)).not.toContain('"won"');
+  });
+
+  it("counts matching field assertions without claiming the free-text conclusion is verified", () => {
+    const sourceId = "84598184-e361-4faa-ad1e-ae5525e85323";
+    const report = evaluateAgentRun(run({
+      resultDocument: resultDocument({
+        summary: "商机已核对",
+        evidence: [{ sourceType: "lead", sourceId, claim: "商机状态已核对",
+          assertions: [{ field: "status", equals: "open" }] }],
+        missingInformation: [], nextStep: "继续核对", wakeCondition: "none",
+      }),
+      runtimeMessages: [
+        { role: "tool", toolCallId: "read-lead", toolName: "crm_get_lead",
+          content: JSON.stringify({ lead: { id: sourceId, status: "open" } }) },
+      ],
+    }), resolveAgentEvalProfile("crm_intelligence_v1"));
+    expect(report.verdict).toBe("needs_review");
+    expect(report.dimensions.find((item) => item.key === "answer_quality")?.findings)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          code: "structured_claims_not_independently_verified",
+          evidence: { observed: 1, total: 1, verifiedAssertions: 1 },
+        }),
+      ]));
+  });
+
+  it("fails closed on a malformed persisted structured result", () => {
+    const report = evaluateAgentRun(run({ resultDocument: { summary: "unbounded" } }),
+      resolveAgentEvalProfile("crm_intelligence_v1"));
+    expect(report.verdict).toBe("fail");
+    expect(report.dimensions.find((item) => item.key === "answer_quality")?.findings)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: "structured_result_invalid" }),
+      ]));
   });
 
   it("fails an external action that starts before human approval", () => {

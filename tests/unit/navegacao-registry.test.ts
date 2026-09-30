@@ -85,7 +85,8 @@ describe("sidebarGroups", () => {
     const hrefs = sidebarGroups(true, null).flatMap((g) => g.items.map((i) => i.href));
     // Conhecimento existe no registro, mas é do hub — não do sidebar.
     expect(hrefs).not.toContain("/app/ai/knowledge/sources");
-    expect(hrefs).toContain("/app/ai/agents");
+    expect(hrefs).toContain("/app/ai/workbench");
+    expect(hrefs).not.toContain("/app/ai/agents");
   });
 
   it("Etapas do funil é CRM, não Configurações — o achado que originou esta mudança", () => {
@@ -150,14 +151,14 @@ describe("sidebarGroups", () => {
     expect(ids).toContain("atendimento");
   });
 
-  it("a ordem dentro do grupo de IA é a do uso real: agentes, follow-ups, roteadores", () => {
+  it("a ordem dentro do grupo de IA é a do uso real: workbench, follow-ups, roteadores", () => {
     // Provedores e Execuções NÃO entram aqui, e a razão é medida: pô-las na
     // sidebar estourou a dobra em 900px (e2e `navegacao.spec.ts`). Elas seguem
-    // o padrão das outras nove telas do grupo — alcançáveis pelo hub "Ver tudo
-    // em IA", que é o desenho existente para tela de configuração.
+    // o padrão das outras telas de configuração — alcançáveis pelo hub "Ver tudo
+    // em IA". O Workbench tomou o lugar do catálogo de Agents no uso diário.
     const ia = sidebarGroups(true, null).find((g) => g.group.id === "ia");
     expect(ia?.items.map((i) => i.href)).toEqual([
-      "/app/ai/agents",
+      "/app/ai/workbench",
       "/app/ai/followups",
       "/app/ai/routers",
     ]);

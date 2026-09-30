@@ -20,7 +20,7 @@ export async function runWorkbenchResumeJob(
   const beforeSideEffect = () => assertWorkbenchJobLease(pool, job, workerId);
   const { data: run, error: runError } = await admin
     .from("ai_workbench_runs")
-    .select("id, agent_id, task, mode, status, runtime_state, scope, budget, final_text")
+    .select("id, agent_id, mission_id, task, mode, status, runtime_state, scope, budget, final_text")
     .eq("organization_id", job.organization_id)
     .eq("id", runId)
     .maybeSingle();
@@ -82,7 +82,9 @@ export async function runWorkbenchResumeJob(
     runId,
     jobId: job.id,
     agentId: run.agent_id,
-    versionId: runtime.versionId,
+      missionId: run.mission_id,
+      versionId: runtime.versionId,
+      runtimeState: runtime,
     task: run.task,
     mode: run.mode as "inspect" | "act",
     scope,

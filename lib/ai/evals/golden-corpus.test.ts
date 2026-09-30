@@ -12,7 +12,7 @@ describe("versioned Workbench Eval golden corpus", () => {
         dimension.findings.map((finding) => finding.code),
       );
 
-      expect(report.profileRevision).toBe(5);
+      expect(report.profileRevision).toBe(7);
       expect(report.verdict).toBe(fixture.expected.verdict);
       expect(codes).toEqual(expect.arrayContaining(fixture.expected.findingCodes));
     });

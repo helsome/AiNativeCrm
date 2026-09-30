@@ -153,7 +153,7 @@ async function ensureDraftVersion(
   if (!catalogModel?.supports_tools || catalogModel.deprecated_at) return;
   const { data: latest, error: readError } = await admin
     .from("ai_agent_versions")
-    .select("id, version_number, status, system_prompt, tool_ids, knowledge_source_ids")
+    .select("id, version_number, status, system_prompt, tool_ids, knowledge_source_ids, max_steps, token_budget, cost_budget_cents")
     .eq("organization_id", organizationId)
     .eq("agent_id", agentId)
     .order("version_number", { ascending: false })
@@ -170,6 +170,9 @@ async function ensureDraftVersion(
     if (
       latest.system_prompt !== definition.systemPrompt ||
       JSON.stringify(latest.tool_ids ?? []) !== JSON.stringify(definition.toolIds) ||
+      latest.max_steps !== definition.defaultBudget.maxSteps ||
+      latest.token_budget !== definition.defaultBudget.tokenBudget ||
+      latest.cost_budget_cents !== definition.defaultBudget.costBudgetCents ||
       JSON.stringify(latest.knowledge_source_ids ?? []) !==
         JSON.stringify(desiredKnowledgeSourceIds)
     ) {
@@ -180,6 +183,9 @@ async function ensureDraftVersion(
           provider,
           model,
           tool_ids: [...definition.toolIds],
+          max_steps: definition.defaultBudget.maxSteps,
+          token_budget: definition.defaultBudget.tokenBudget,
+          cost_budget_cents: definition.defaultBudget.costBudgetCents,
           knowledge_source_ids: desiredKnowledgeSourceIds,
         } as never)
         .eq("organization_id", organizationId)

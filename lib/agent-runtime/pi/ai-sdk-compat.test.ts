@@ -151,6 +151,34 @@ describe("Vercel AI compatibility adapter", () => {
     expect(result.text).toBe("done");
   });
 
+  it("forwards durable steering through the compatibility seam into Pi's next turn", async () => {
+    const direction = "负责人要求先核对新合同";
+    const poll = vi.fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([{ id: "direction-1", content: direction }]);
+    const result = await runPiAiSdkCall({
+      system: "CRM",
+      messages: [{ role: "user", content: "核对商机" }],
+      model,
+      runtime: runtimeWithFaux([
+        fauxAssistantMessage("旧计划"),
+        (context) => {
+          expect(JSON.stringify(context.messages)).toContain(direction);
+          return fauxAssistantMessage("已按新合同核对");
+        },
+      ]),
+      steering: { poll },
+      maxSteps: 3,
+    });
+    expect(result.text).toBe("已按新合同核对");
+    expect(result.runtimeMessages.some((message) => message.role === "user" &&
+      JSON.stringify(message.content).includes(direction))).toBe(true);
+    expect(result.events.filter((event) => event.type === "steering_queued"))
+      .toEqual([{ type: "steering_queued", data: { steeringId: "direction-1" } }]);
+    expect(result.events.filter((event) => event.type === "steering_consumed"))
+      .toEqual([{ type: "steering_consumed", data: { steeringId: "direction-1" } }]);
+  });
+
   it("continues from CRM-owned runtime messages without replaying completed tool calls", async () => {
     const execute = vi.fn(async () => ({ shouldNeverRun: true }));
     const resumed = await runPiAiSdkCall({

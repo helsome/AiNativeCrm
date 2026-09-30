@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 
 import { ok, fail } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
+import { requireSupportWrite } from "@/lib/impersonate/support";
 import { loadAgentVersionConfig } from "@/lib/agent-engine/agent/agent-config";
 import { requestTurnDeps } from "@/lib/agent-engine/agent/request-deps";
 import { getRequestPool } from "@/lib/agent-engine/db/request-pool";
@@ -57,7 +58,7 @@ async function loadEvaluationMaterial(
 ): Promise<EvaluationMaterial> {
   const { data: run, error: runError } = await admin
     .from("ai_workbench_runs")
-    .select("id, agent_id, task, mode, status, final_text, updated_at, runtime_state")
+    .select("id, agent_id, task, mode, status, final_text, result_document, updated_at, runtime_state")
     .eq("organization_id", organizationId)
     .eq("id", runId)
     .maybeSingle();
@@ -79,7 +80,7 @@ async function loadEvaluationMaterial(
       .maybeSingle(),
     admin
       .from("ai_agent_run_events")
-      .select("sequence, event_type, payload")
+      .select("id, sequence, event_type, payload")
       .eq("organization_id", organizationId)
       .eq("run_id", runId)
       .order("sequence", { ascending: true }),
@@ -118,7 +119,7 @@ async function loadEvaluationMaterial(
           .in("run_id", childIds),
         admin
           .from("ai_agent_run_events")
-          .select("run_id, sequence, event_type, payload, created_at")
+          .select("id, run_id, sequence, event_type, payload, created_at")
           .eq("organization_id", organizationId)
           .in("run_id", childIds)
           .order("created_at", { ascending: true }),
@@ -132,6 +133,7 @@ async function loadEvaluationMaterial(
     ...(childStates ?? []).flatMap((child) => parseRuntimeMessages(child.messages) ?? []),
   ];
   const parentEvents = (events ?? []).map((event) => ({
+    id: event.id,
     sequence: event.sequence,
     eventType: event.event_type,
     payload:
@@ -143,6 +145,7 @@ async function loadEvaluationMaterial(
   const aggregateEvents = [
     ...parentEvents,
     ...(childEvents ?? []).map((event, index) => ({
+      id: event.id,
       sequence: lastParentSequence + index + 1,
       eventType: event.event_type,
       payload:
@@ -158,6 +161,7 @@ async function loadEvaluationMaterial(
     mode: run.mode as "inspect" | "act",
     status: run.status,
     finalText: run.final_text,
+    resultDocument: run.result_document,
     events: aggregateEvents,
     proposals: (proposals ?? []).map((proposal) => ({
       id: proposal.id,
@@ -182,6 +186,7 @@ async function loadEvaluationMaterial(
           status: run.status,
           updatedAt: run.updated_at,
           finalText: run.final_text,
+          resultDocument: run.result_document,
         },
         events: aggregateEvents,
         proposals,
@@ -258,10 +263,6 @@ export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
   }
   const report = await runAgentEvaluation({ run: material.input, profile: material.profile });
   const inputFingerprint = evaluationFingerprint(material.baseFingerprint, "deterministic");
-  if (!(await persistReport(admin, authz.org.orgId, report, inputFingerprint)))
-    return fail("evaluation_persist_failed", "评测已计算，但无法持久化结果。", 500, {
-      requestId,
-    });
   return ok({ ...report, inputFingerprint }, { requestId });
 }
 
@@ -272,6 +273,8 @@ export async function POST(_req: NextRequest, ctx: RouteCtx): Promise<Response> 
   if (!UUID_RX.test(id)) return fail("invalid_request", "run id 无效。", 400, { requestId });
   const authz = await requireRole("manager", { requestId, resource: "ai_workbench" });
   if (!authz.ok) return authz.response;
+  const supportDenied = await requireSupportWrite(authz.org.orgId);
+  if (supportDenied) return supportDenied;
   const admin = createAdminClient();
   let material: EvaluationMaterial;
   try {

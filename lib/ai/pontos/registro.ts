@@ -161,6 +161,19 @@ export interface PontoDeIa {
 
 export const PONTOS_DE_IA: readonly PontoDeIa[] = [
   {
+    id: "agent_specialist",
+    rotulo: "Specialist do Agent",
+    oQueFaz: "Investiga uma parte da missão com ferramentas de leitura e devolve evidências ao Agent principal.",
+    papel: "entender",
+    exige: { tools: true },
+    emissor: "lib/ai/agents/workbench-collaboration.ts",
+    fixo: {
+      razao: "O specialist herda modelo e credencial do Agent principal da missão; a escolha não é independente.",
+    },
+    sintomaDeFalha: "A missão continua sem as evidências que o specialist deveria buscar.",
+    registraEm: "llm_calls",
+  },
+  {
     id: "agent_preview",
     rotulo: "Testar ou revisar resposta",
     oQueFaz: "Prepara uma resposta com a versão e o conhecimento do agente, sem aplicar alterações ao cliente.",

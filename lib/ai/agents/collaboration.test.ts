@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  collaborationPlanForMission,
   OPPORTUNITY_REVIEW_PLAN,
   selectCollaborationPlan,
   validateCollaborationPlan,
@@ -37,6 +38,28 @@ describe("bounded opportunity-review collaboration", () => {
     expect(
       selectCollaborationPlan({ builtinKey: "crm_intelligence", leadId: "lead-1" }),
     ).toBeNull();
+  });
+
+  it("avoids specialist fan-out for a simple follow-up but keeps it for diagnosis", () => {
+    expect(selectCollaborationPlan({
+      builtinKey: "sales_operations",
+      leadId: "lead-1",
+      task: "为这个商机补一条明天的跟进任务",
+    })).toBeNull();
+    expect(selectCollaborationPlan({
+      builtinKey: "sales_operations",
+      leadId: "lead-1",
+      task: "复盘这个商机停滞的原因，并核对政策依据",
+    })?.key).toBe("opportunity_review_v1");
+  });
+
+  it("serializes Mission specialists without slowing standalone opportunity reviews", () => {
+    expect(collaborationPlanForMission(OPPORTUNITY_REVIEW_PLAN, null)).toBe(OPPORTUNITY_REVIEW_PLAN);
+    const missionPlan = collaborationPlanForMission(OPPORTUNITY_REVIEW_PLAN, "mission-1");
+    expect(missionPlan.maxParallel).toBe(1);
+    expect(missionPlan.specialists).toBe(OPPORTUNITY_REVIEW_PLAN.specialists);
+    expect(OPPORTUNITY_REVIEW_PLAN.maxParallel).toBe(3);
+    expect(validateCollaborationPlan(missionPlan)).toEqual([]);
   });
 
   it("declares every delegated specialist tool on each eligible built-in", () => {

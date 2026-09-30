@@ -29,6 +29,8 @@ export type RuntimeMessage =
       content: string | RuntimeContent[];
       toolCalls?: RuntimeToolCall[];
       usage?: RuntimeUsage;
+      /** Opaque, service-only provider continuation. Never render or return from a product API. */
+      privateContinuation?: unknown;
     }
   | {
       role: "tool";
@@ -109,6 +111,12 @@ export interface AfterToolCallDecision {
   terminate?: boolean;
 }
 
+/** Durable source identity; polling must not remove a message before the transcript is saved. */
+export interface RuntimeSteeringMessage {
+  id: string;
+  content: string;
+}
+
 export interface AgentRuntimeEvent {
   type:
     | "agent_start"
@@ -120,7 +128,9 @@ export interface AgentRuntimeEvent {
     | "message_end"
     | "tool_execution_start"
     | "tool_execution_update"
-    | "tool_execution_end";
+    | "tool_execution_end"
+    | "steering_queued"
+    | "steering_consumed";
   data: Record<string, unknown>;
 }
 
@@ -153,6 +163,9 @@ export interface AgentTurnInput {
     turn: number;
     usage: RuntimeUsage;
   }) => boolean | Promise<boolean>;
+  steering?: {
+    poll(): Promise<RuntimeSteeringMessage[]>;
+  };
   onEvent?: (event: AgentRuntimeEvent) => void | Promise<void>;
 }
 

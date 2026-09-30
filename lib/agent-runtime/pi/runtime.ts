@@ -51,6 +51,10 @@ function now(): number {
   return Date.now();
 }
 
+function steeringMarker(id: string): string {
+  return `[crm-steering-id:${encodeURIComponent(id)}]`;
+}
+
 function textOf(content: string | RuntimeContent[]): string {
   return typeof content === "string"
     ? content
@@ -99,6 +103,20 @@ function messageToPi(message: RuntimeMessage, binding: AgentTurnInput["model"]):
     case "user":
       return { role: "user", content: contentToPi(message.content), timestamp };
     case "assistant":
+      if (message.privateContinuation !== undefined) {
+        const saved = message.privateContinuation;
+        if (
+          saved === null || typeof saved !== "object" || Array.isArray(saved) ||
+          !Array.isArray((saved as AssistantMessage).content) ||
+          typeof (saved as AssistantMessage).api !== "string" ||
+          typeof (saved as AssistantMessage).provider !== "string" ||
+          typeof (saved as AssistantMessage).model !== "string" ||
+          typeof (saved as AssistantMessage).stopReason !== "string" ||
+          typeof (saved as AssistantMessage).timestamp !== "number" ||
+          !((saved as AssistantMessage).usage && typeof (saved as AssistantMessage).usage === "object")
+        ) throw new Error("pi_assistant_continuation_state_invalid");
+        return { ...(saved as AssistantMessage), role: "assistant" };
+      }
       return {
         role: "assistant",
         content: [
@@ -173,13 +191,26 @@ function messageFromPi(message: AgentMessage): RuntimeMessage | null {
   return {
     role: "assistant",
     content: content
-      .filter((part) => part.type === "text" || part.type === "thinking")
-      .map((part) => ("text" in part ? part.text : part.thinking))
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
       .join(""),
     toolCalls: content
       .filter((part) => part.type === "toolCall")
       .map((part) => ({ id: part.id, name: part.name, arguments: part.arguments })),
     usage: usageOf((message as AssistantMessage).usage),
+    privateContinuation: {
+      content,
+      api: message.api,
+      provider: message.provider,
+      model: message.model,
+      usage: message.usage,
+      stopReason: message.stopReason,
+      timestamp: message.timestamp,
+      ...(message.responseModel ? { responseModel: message.responseModel } : {}),
+      ...(message.responseId ? { responseId: message.responseId } : {}),
+      ...(message.providerThinkingLevel ? { providerThinkingLevel: message.providerThinkingLevel } : {}),
+      ...(message.endTurn !== undefined ? { endTurn: message.endTurn } : {}),
+    },
   };
 }
 
@@ -252,6 +283,10 @@ export class PiAgentRuntime implements AgentRuntime {
     const toolByName = new Map((input.tools ?? []).map((tool) => [tool.name, tool]));
     let turns = 0;
     let usage: RuntimeUsage = { ...EMPTY_USAGE };
+    const queuedSteering = new Map<string, string>();
+    const steeringMessages = new Map<AgentMessage, string>();
+    const steeringInModelContext = new Set<string>();
+    const steeringSentToModel = new Set<string>();
 
     const tools: AgentTool[] = (input.tools ?? []).map((tool) => {
       const parameters = Type.Unsafe(tool.inputSchema);
@@ -297,14 +332,24 @@ export class PiAgentRuntime implements AgentRuntime {
         );
         return next.map((message) => messageToPi(message, input.model));
       },
-      convertToLlm: (messages) =>
-        messages.filter(
+      convertToLlm: (messages) => {
+        const modelMessages = messages.filter(
           (message): message is Message =>
             message.role === "system" ||
             message.role === "user" ||
             message.role === "assistant" ||
             message.role === "toolResult",
-        ),
+        );
+        // transformContext may remove a direction after Pi appended it to its
+        // transcript. A message_end event alone is not proof it reached the LLM.
+        for (const steeringId of steeringInModelContext) {
+          const marker = steeringMarker(steeringId);
+          if (modelMessages.some((message) => message.role === "user" &&
+              textOf(message.content).includes(marker)))
+            steeringSentToModel.add(steeringId);
+        }
+        return modelMessages;
+      },
       beforeToolCall: async ({ toolCall, args }) => {
         const tool = toolByName.get(toolCall.name);
         calls.push({
@@ -356,16 +401,69 @@ export class PiAgentRuntime implements AgentRuntime {
       },
     });
 
+    const queuePendingSteering = async () => {
+      if (!input.steering) return;
+      const pending = await input.steering.poll();
+      if (!Array.isArray(pending) || pending.length > 8)
+        throw new Error("pi_steering_batch_invalid");
+      const batchIdentity = new Map(queuedSteering);
+      for (const item of pending) {
+        if (item === null || typeof item !== "object" ||
+            typeof item.id !== "string" || item.id.length > 200 || !item.id.trim() ||
+            typeof item.content !== "string" || item.content.length > 20_000 ||
+            !item.content.trim())
+          throw new Error("pi_steering_message_invalid");
+        const previous = batchIdentity.get(item.id);
+        if (previous !== undefined && previous !== item.content)
+          throw new Error("pi_steering_source_conflict");
+        batchIdentity.set(item.id, item.content);
+      }
+      for (const item of pending) {
+        const previous = queuedSteering.get(item.id);
+        if (previous !== undefined) continue;
+        queuedSteering.set(item.id, item.content);
+        const message = messageToPi({ role: "user",
+          content: `${steeringMarker(item.id)}\n${item.content}` }, input.model);
+        steeringMessages.set(message, item.id);
+        agent.steer(message);
+        const queued: AgentRuntimeEvent = { type: "steering_queued", data: { steeringId: item.id } };
+        events.push(queued);
+        await input.onEvent?.(queued);
+      }
+    };
+
     agent.subscribe(async (event) => {
       const mapped = runtimeEvent(event);
       events.push(mapped);
       await input.onEvent?.(mapped);
+      if (event.type === "message_end") {
+        const steeringId = steeringMessages.get(event.message);
+        if (steeringId !== undefined) steeringInModelContext.add(steeringId);
+      }
+      if (event.type !== "turn_end" || event.message.role !== "assistant") return;
+      if (event.message.stopReason !== "error" && event.message.stopReason !== "aborted") {
+        for (const steeringId of steeringSentToModel) {
+          const consumed: AgentRuntimeEvent = { type: "steering_consumed", data: { steeringId } };
+          events.push(consumed);
+          await input.onEvent?.(consumed);
+        }
+        steeringInModelContext.clear();
+        steeringSentToModel.clear();
+      }
+      if (!input.steering || event.message.stopReason === "error" ||
+          event.message.stopReason === "aborted" || input.abortSignal?.aborted ||
+          (input.maxTurns !== undefined && turns + 1 >= input.maxTurns)) return;
+      await queuePendingSteering();
     });
 
     const abort = () => agent.abort();
     input.abortSignal?.addEventListener("abort", abort, { once: true });
 
     try {
+      // Pi checks its steering queue before the first model request. A command
+      // accepted just before this worker starts must not wait for a second turn.
+      await queuePendingSteering();
+      input.abortSignal?.throwIfAborted();
       await agent.prompt(input.prompt);
     } finally {
       input.abortSignal?.removeEventListener("abort", abort);
