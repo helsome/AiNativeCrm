@@ -35,6 +35,20 @@ export interface MissionEvalInput {
   }>;
   lead: { id: string; status: string; stageId: string; contactId: string | null } | null;
   budget: MissionBudgetUsage;
+  structuredOffer: MissionStructuredOfferSignal;
+}
+
+/** A bounded, channel-backed terms signal; never a general free-text outcome proof. */
+export interface MissionStructuredOfferSignal {
+  offerId: string | null;
+  verdict: "not_issued" | "not_sent" | "awaiting_reply" | "unverified" |
+    "verified" | "expired" | "superseded" | "conflict";
+  reason: string;
+  terms: { description: string; amountMinor: number; currency: string;
+    deliveryDate: string } | null;
+  outboundMessageId: string | null;
+  inboundMessageId: string | null;
+  structuredTermsAccepted: boolean;
 }
 
 export interface MissionEvalReport {
@@ -82,6 +96,7 @@ export interface MissionEvalReport {
     verdict: "observed" | "not_observed" | "unverified" | "conflict";
     reason: string;
   }>;
+  structuredOffer: MissionStructuredOfferSignal;
 }
 
 function auditMissionCrmChanges(input: MissionEvalInput): {
@@ -308,6 +323,23 @@ export function evaluateMission(input: MissionEvalInput): MissionEvalReport {
     findings.push({ code: "completed_observable_conditions_unmet", severity: "review" });
   if (input.mission.status === "completed" && observableChecks.some((check) => check.verdict === "unverified"))
     findings.push({ code: "completed_observable_conditions_unverified", severity: "review" });
+  const offerSignal = input.structuredOffer;
+  const offerSignalInconsistent = offerSignal.structuredTermsAccepted !== (offerSignal.verdict === "verified") ||
+    (offerSignal.verdict === "verified" && (!offerSignal.offerId || !offerSignal.terms ||
+      !offerSignal.outboundMessageId || !offerSignal.inboundMessageId));
+  const structuredOffer: MissionStructuredOfferSignal = offerSignalInconsistent
+    ? { ...offerSignal, verdict: "conflict", reason: "structured_offer_signal_inconsistent",
+      structuredTermsAccepted: false }
+    : offerSignal;
+  if (structuredOffer.verdict === "conflict")
+    findings.push({ code: "structured_offer_evidence_conflict", severity: "fail" });
+  else if (structuredOffer.verdict === "unverified")
+    findings.push({ code: "structured_offer_channel_unverified", severity: "review" });
+  else if (structuredOffer.verdict === "verified")
+    findings.push({ code: "structured_offer_terms_confirmed_not_full_outcome", severity: "info" });
+  if (structuredOffer.offerId && input.mission.status === "completed" &&
+      structuredOffer.verdict !== "verified")
+    findings.push({ code: "completed_structured_offer_not_confirmed", severity: "review" });
   const attested = input.mission.status === "completed" &&
     Boolean(input.mission.resolutionReason?.trim()) &&
     Boolean(input.mission.resolvedByUserId);
@@ -351,5 +383,6 @@ export function evaluateMission(input: MissionEvalInput): MissionEvalReport {
     findings,
     customerDeliveries,
     customerReplies,
+    structuredOffer,
   };
 }

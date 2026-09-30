@@ -6,6 +6,7 @@ import { requireRole } from "@/lib/auth/require-role";
 import { evaluateMission } from "@/lib/ai/evals/evaluate-mission";
 import { loadMissionDeliveryEvidence } from "@/lib/ai/evals/mission-delivery-evidence";
 import { loadMissionCustomerResponses } from "@/lib/ai/evals/mission-customer-response";
+import { evaluateExplicitOffer } from "@/lib/ai/evals/mission-explicit-offer-evidence";
 import { parseMissionAcceptanceContract } from "@/lib/ai/evals/mission-acceptance-contract";
 import { loadMissionBudgetUsage } from "@/lib/ai/agents/mission-budget";
 import { getRequestPool } from "@/lib/agent-engine/db/request-pool";
@@ -79,6 +80,7 @@ export async function GET(_request: NextRequest, ctx: RouteCtx): Promise<Respons
   let replyDrafts;
   let customerResponses;
   let budget;
+  let explicitOffer;
   try {
     replyDrafts = await loadMissionDeliveryEvidence(pool, organizationId, sendProposalIds);
     customerResponses = await loadMissionCustomerResponses(
@@ -86,8 +88,9 @@ export async function GET(_request: NextRequest, ctx: RouteCtx): Promise<Respons
       replyDrafts.flatMap((draft) => draft.messageId ? [draft.messageId] : []),
     );
     budget = await loadMissionBudgetUsage(pool, organizationId, id);
+    explicitOffer = await evaluateExplicitOffer(pool, organizationId, id);
   } catch {
-    return fail("mission_evidence_unavailable", "无法核对发送、客户回复凭证或任务预算。", 503, { requestId });
+    return fail("mission_evidence_unavailable", "无法核对发送、客户回复、报价确认凭证或任务预算。", 503, { requestId });
   }
   if (!budget) return fail("mission_budget_unavailable", "任务累计预算不存在。", 503, { requestId });
 
@@ -126,6 +129,13 @@ export async function GET(_request: NextRequest, ctx: RouteCtx): Promise<Respons
       id: lead.id, status: lead.status, stageId: lead.stage_id, contactId: lead.contact_id,
     } : null,
     budget,
+    structuredOffer: {
+      offerId: explicitOffer.offerId, verdict: explicitOffer.verdict,
+      reason: explicitOffer.reason, terms: explicitOffer.terms,
+      outboundMessageId: explicitOffer.outboundMessageId,
+      inboundMessageId: explicitOffer.inboundMessageId,
+      structuredTermsAccepted: explicitOffer.structuredTermsAccepted,
+    },
   });
   return ok(report, { requestId });
 }

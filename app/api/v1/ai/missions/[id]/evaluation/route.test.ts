@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { loadMissionBudgetUsage } from "@/lib/ai/agents/mission-budget";
 import { loadMissionDeliveryEvidence } from "@/lib/ai/evals/mission-delivery-evidence";
 import { loadMissionCustomerResponses } from "@/lib/ai/evals/mission-customer-response";
+import { evaluateExplicitOffer } from "@/lib/ai/evals/mission-explicit-offer-evidence";
 
 vi.mock("@/lib/auth/require-role", () => ({ requireRole: vi.fn() }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn() }));
@@ -13,6 +14,7 @@ vi.mock("@/lib/agent-engine/db/request-pool", () => ({ getRequestPool: vi.fn(() 
 vi.mock("@/lib/ai/agents/mission-budget", () => ({ loadMissionBudgetUsage: vi.fn() }));
 vi.mock("@/lib/ai/evals/mission-delivery-evidence", () => ({ loadMissionDeliveryEvidence: vi.fn() }));
 vi.mock("@/lib/ai/evals/mission-customer-response", () => ({ loadMissionCustomerResponses: vi.fn() }));
+vi.mock("@/lib/ai/evals/mission-explicit-offer-evidence", () => ({ evaluateExplicitOffer: vi.fn() }));
 
 const ORG = "11111111-1111-4111-8111-111111111111";
 const MISSION = "22222222-2222-4222-8222-222222222222";
@@ -112,6 +114,11 @@ beforeEach(() => {
     reply: { id: "inbound-1", contactId: "contact-1", conversationId: "conversation-1",
       sentAt: "2026-09-30T00:02:00.000Z" },
   }]);
+  vi.mocked(evaluateExplicitOffer).mockResolvedValue({
+    offerId: null, verdict: "not_issued", reason: "explicit_offer_missing", terms: null,
+    offerText: null, acceptanceText: null, outboundMessageId: null, inboundMessageId: null,
+    structuredTermsAccepted: false, legalIdentityVerified: false, businessOutcomeVerified: false,
+  });
 });
 
 async function requestEvaluation() {
@@ -140,6 +147,34 @@ describe("GET /api/v1/ai/missions/:id/evaluation", () => {
     expect(loadMissionBudgetUsage).toHaveBeenCalledWith({}, ORG, MISSION);
     expect(loadMissionDeliveryEvidence).toHaveBeenCalledWith({}, ORG, [PROPOSAL]);
     expect(loadMissionCustomerResponses).toHaveBeenCalledWith({}, ORG, ["message-1"]);
+    expect(evaluateExplicitOffer).toHaveBeenCalledWith({}, ORG, MISSION);
+  });
+
+  it("reports channel-confirmed terms without exposing quote text or claiming full outcome", async () => {
+    stubAdmin();
+    vi.mocked(evaluateExplicitOffer).mockResolvedValueOnce({
+      offerId: "offer-1", verdict: "verified", reason: "exact_customer_channel_confirmation",
+      terms: { description: "设备", amountMinor: 123450, currency: "CNY", deliveryDate: "2026-10-15" },
+      offerText: "private quote text", acceptanceText: "private acceptance text",
+      outboundMessageId: "message-1", inboundMessageId: "inbound-1",
+      structuredTermsAccepted: true, legalIdentityVerified: false, businessOutcomeVerified: false,
+    });
+    const response = await requestEvaluation();
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.data.structuredOffer).toMatchObject({
+      verdict: "verified", structuredTermsAccepted: true, offerId: "offer-1",
+    });
+    expect(payload.data.businessOutcomeVerified).toBe(false);
+    expect(JSON.stringify(payload)).not.toContain("private quote text");
+    expect(JSON.stringify(payload)).not.toContain("private acceptance text");
+  });
+
+  it("fails closed when structured-offer evidence cannot be read", async () => {
+    stubAdmin();
+    vi.mocked(evaluateExplicitOffer).mockRejectedValueOnce(new Error("database_unavailable"));
+    const response = await requestEvaluation();
+    expect(response.status).toBe(503);
   });
 
   it("does not read cross-tenant evidence when the Mission is not visible", async () => {

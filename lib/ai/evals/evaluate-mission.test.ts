@@ -40,9 +40,65 @@ const base: MissionEvalInput = {
     missionId: "mission-1", maxTotalTokens: 72_000, maxTotalCostCents: 200,
     usedTokens: 12_000, usedCostCents: 15, unknownCostCalls: 0,
   },
+  structuredOffer: {
+    offerId: null, verdict: "not_issued", reason: "explicit_offer_missing",
+    terms: null, outboundMessageId: null, inboundMessageId: null,
+    structuredTermsAccepted: false,
+  },
 };
 
 describe("mission outcome evaluation", () => {
+  it("reports authenticated quote terms separately from full business acceptance", () => {
+    const report = evaluateMission({
+      ...base,
+      structuredOffer: {
+        offerId: "offer-1", verdict: "verified",
+        reason: "exact_customer_channel_confirmation",
+        terms: { description: "500 件设备", amountMinor: 123450, currency: "CNY",
+          deliveryDate: "2026-10-15" },
+        outboundMessageId: "message-1", inboundMessageId: "message-2",
+        structuredTermsAccepted: true,
+      },
+    });
+    expect(report.structuredOffer.structuredTermsAccepted).toBe(true);
+    expect(report.businessOutcomeVerified).toBe(false);
+    expect(report.findings).toContainEqual({
+      code: "structured_offer_terms_confirmed_not_full_outcome", severity: "info",
+    });
+  });
+
+  it("does not attest a completed Mission with an unsigned customer reply", () => {
+    const report = evaluateMission({
+      ...base,
+      mission: { ...base.mission, status: "completed", resolutionReason: "负责人确认",
+        resolvedByUserId: "user-1" },
+      structuredOffer: { offerId: "offer-1", verdict: "unverified",
+        reason: "customer_reply_signature_unverified", terms: null,
+        outboundMessageId: "message-1", inboundMessageId: "message-2",
+        structuredTermsAccepted: false },
+    });
+    expect(report.verdict).toBe("needs_review");
+    expect(report.findings).toContainEqual({
+      code: "structured_offer_channel_unverified", severity: "review",
+    });
+    expect(report.findings).toContainEqual({
+      code: "completed_structured_offer_not_confirmed", severity: "review",
+    });
+  });
+
+  it("fails closed on an internally inconsistent terms-confirmation signal", () => {
+    const report = evaluateMission({
+      ...base,
+      structuredOffer: { ...base.structuredOffer, offerId: "offer-1",
+        verdict: "verified", structuredTermsAccepted: true },
+    });
+    expect(report.structuredOffer).toMatchObject({
+      verdict: "conflict", reason: "structured_offer_signal_inconsistent",
+      structuredTermsAccepted: false,
+    });
+    expect(report.verdict).toBe("policy_failed");
+  });
+
   it("does not mistake a completed Pi run for a completed business goal", () => {
     const report = evaluateMission(base);
     expect(report.verdict).toBe("needs_review");

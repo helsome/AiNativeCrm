@@ -133,6 +133,11 @@ describe("LeadMissionPanel internal information", () => {
             maxTotalCostCents: 50, unknownCostCalls: 0 },
         },
         customerDeliveries: [], customerReplies: [], findings: [],
+        structuredOffer: { offerId: "offer-1", verdict: "verified",
+          reason: "exact_customer_channel_confirmation",
+          terms: { description: "设备", amountMinor: 123450, currency: "CNY",
+            deliveryDate: "2026-10-15" }, outboundMessageId: "message-1",
+          inboundMessageId: "inbound-1", structuredTermsAccepted: true },
       }));
     vi.stubGlobal("fetch", fetch);
     render(<LeadMissionPanel leadId="lead-a" pipelineId="pipeline-a" open />);
@@ -140,6 +145,8 @@ describe("LeadMissionPanel internal information", () => {
     expect(await screen.findByText(/可观察条件：全部满足/)).toBeInTheDocument();
     expect(screen.getByText(/业务结果未由系统独立核验/)).toBeInTheDocument();
     expect(screen.getByText(/不等于自由文本业务验收/)).toBeInTheDocument();
+    expect(screen.getByText(/已核对渠道签名及原样确认，仅证明这版条款获明确回复/)).toBeInTheDocument();
+    expect(screen.getByText(/不等于完整业务验收/)).toBeInTheDocument();
   });
 
   it("shows cited customer text as a cost-bearing independent review, not verified completion", async () => {

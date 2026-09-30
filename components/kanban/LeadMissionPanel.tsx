@@ -63,6 +63,17 @@ type MissionEvaluation = {
     inboundMessageId: string | null;
     verdict: "observed" | "not_observed" | "unverified" | "conflict";
   }>;
+  structuredOffer: {
+    offerId: string | null;
+    verdict: "not_issued" | "not_sent" | "awaiting_reply" | "unverified" |
+      "verified" | "expired" | "superseded" | "conflict";
+    reason: string;
+    terms: { description: string; amountMinor: number; currency: string;
+      deliveryDate: string } | null;
+    outboundMessageId: string | null;
+    inboundMessageId: string | null;
+    structuredTermsAccepted: boolean;
+  };
 };
 
 type CustomerAcceptanceAssessment = {
@@ -525,6 +536,19 @@ export function LeadMissionPanel({ leadId, pipelineId, open }: {
             {evaluation && (
               <div className="mt-2 rounded-md border border-border p-2 text-xs text-text-muted">
                 <p>{VERDICT_LABEL[evaluation.verdict]}；业务结果未由系统独立核验。</p>
+                {evaluation.structuredOffer?.offerId && (
+                  <p>
+                    结构化报价与交期：{evaluation.structuredOffer.verdict === "verified"
+                      ? "已核对渠道签名及原样确认，仅证明这版条款获明确回复"
+                      : evaluation.structuredOffer.verdict === "unverified"
+                        ? "发现同文回复，但缺少可信渠道签名，不能算确认"
+                        : evaluation.structuredOffer.verdict === "conflict"
+                          ? "报价或确认凭证冲突，需人工核对"
+                          : "尚未取得有效的渠道确认"}；不等于完整业务验收。
+                    {evaluation.structuredOffer.inboundMessageId &&
+                      `（入站消息 ${evaluation.structuredOffer.inboundMessageId.slice(0, 8)}）`}
+                  </p>
+                )}
                 {evaluation.observableChecks.length > 0 && (
                   <div className="mt-1">
                     <p>可观察条件：{evaluation.observableConditionsMet === true ? "全部满足"
