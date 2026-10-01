@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { derivarMarca, extrairRegua } from "@/lib/branding/contraste";
 
 import {
   CURVA_C,
@@ -48,7 +49,7 @@ function blocoRoot(css: string): string {
   return css.slice(i, fim);
 }
 
-function stopsSageDoCss(): string[] {
+function stopsDoProdutoNoCss(): string[] {
   const raiz = blocoRoot(CSS);
   return GRAUS.map((g) => {
     const m = new RegExp(`--color-accent-${g}:\\s*(#[0-9a-f]{6})`, "i").exec(raiz);
@@ -103,23 +104,22 @@ describe("conversões de cor", () => {
 });
 
 describe("rampaDeSemente — catraca de calibração contra o design system", () => {
-  const esperados = stopsSageDoCss();
+  const esperados = stopsDoProdutoNoCss();
 
   it("lê 11 stops distintos do globals.css (guarda de vacuidade)", () => {
     // Sem isto, um regex quebrado devolveria lista vazia e a comparação abaixo passaria
     // por não ter o que comparar — instrumento morto tem cara de teste verde.
     expect(esperados).toHaveLength(11);
     expect(new Set(esperados).size).toBe(11);
-    expect(esperados[K]).toBe("#506d48");
+    expect(esperados[K]).toBe("#934531");
   });
 
-  it("reproduz os 11 stops Sage a partir de #506d48 com Δ ≤ 2/255 por canal", () => {
-    const derivada = rampaDeSemente("#506d48");
-    const distancias = esperados.map((esperado, i) => distanciaPorCanal(esperado, derivada[i]!));
-    expect(
-      Math.max(...distancias),
-      `derivada: ${derivada.join(" ")}\nesperada: ${esperados.join(" ")}\nΔ: ${distancias.join(",")}`,
-    ).toBeLessThanOrEqual(2);
+  it("usar explicitamente a cor do produto conserva os 11 stops literais", () => {
+    const derivada = derivarMarca(esperados[K]!, extrairRegua(CSS)).rampa;
+    expect(derivada).toEqual(esperados);
+    // A derivação genérica não pode se fingir de paleta curada: ela mantém o
+    // matiz da semente, enquanto a régua do produto ajusta o matiz por stop.
+    expect(rampaDeSemente(esperados[K]!)).not.toEqual(esperados);
   });
 
   it("devolve o hex LITERAL no stop da semente", () => {

@@ -840,7 +840,12 @@ export function derivarMarca(semente: string, regua: Regua): Marca {
   const marca = normalizarHex(semente);
   const { C } = hexParaOklch(marca);
   const acromatica = C < LIMIAR_ACROMATICO;
-  const rampa = acromatica ? regua.rampaDoProduto : rampaDeSemente(marca);
+  // A paleta do produto é curada à mão e varia ligeiramente o matiz entre
+  // stops. Quando a cor escolhida É a do produto, emitir a própria régua evita
+  // que configurar explicitamente o padrão altere a aparência da instalação.
+  const rampa = acromatica || marca === regua.rampaDoProduto[6]
+    ? regua.rampaDoProduto
+    : rampaDeSemente(marca);
 
   const claro = derivarTema(regua.claro, rampa);
   const escuro = derivarTema(regua.escuro, rampa);

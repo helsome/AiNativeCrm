@@ -10,9 +10,9 @@
  * pré-buildada e cada dependência nova é superfície de advisory num produto que o
  * cliente hospeda. As conversões (sRGB ↔ OKLab, de Björn Ottosson) cabem em 60 linhas.
  *
- * A régua é `app/globals.css`. `rampaDeSemente('#934531')` reproduz os 11 stops Clay
- * com Δ ≤ 2/255 por canal — medido, e vigiado por
- * `tests/unit/branding-rampa.test.ts`, que LÊ os stops esperados do próprio CSS.
+ * A régua visual do produto é `app/globals.css`. Sua paleta Clay é curada à mão
+ * e varia levemente o matiz; a derivação genérica preserva o matiz da marca do
+ * cliente. `derivarMarca` usa a régua literal quando a semente é a cor do produto.
  */
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
@@ -203,8 +203,7 @@ export function compor(cor: string, alfa: number, sobre: string): string {
 // ── A rampa ──────────────────────────────────────────────────────────────────
 
 /**
- * Lightness dos 11 stops Sage, medida em OKLab a partir de `app/globals.css`.
- * É a FORMA da escada — a curva de luminosidade que o design system desenhou à mão.
+ * Forma da escada original Sage, mantida para derivação genérica de marcas.
  */
 export const ESCADA_L = [
   0.9695, 0.9317, 0.8597, 0.7634, 0.6718, 0.5899, 0.5015, 0.4303, 0.3772, 0.339, 0.2278,

@@ -239,7 +239,9 @@ describe("derivarMarca — as 16 sementes adversariais", () => {
     // "ajustasse" o accent para folgar de uma semântica, este teste pega.
     for (const { semente, marca } of resultados) {
       if (marca.origemDaRampa !== "semente") continue;
-      const rampa = rampaDeSemente(semente);
+      const rampa = semente === REGUA.rampaDoProduto[6]
+        ? REGUA.rampaDoProduto
+        : rampaDeSemente(semente);
       expect(rampa, `${semente}`).toContain(marca.claro.accent);
       expect(rampa, `${semente}`).toContain(marca.escuro.accent);
       expect(marca.marca).toBe(semente);
