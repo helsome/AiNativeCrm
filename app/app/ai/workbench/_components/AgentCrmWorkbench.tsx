@@ -191,6 +191,8 @@ export function AgentCrmWorkbench({
     : {});
   const [scopeLabel, setScopeLabel] = useState(initialLead?.title ?? "");
   const selected = agents.find((agent) => agent.id === agentId) ?? agents[0];
+  const canDelegateMission = mode === "act" && Boolean(scope.leadId);
+  const missionEnabled = canDelegateMission && delegateMission;
 
   const fetchRuns = async (): Promise<Run[]> => {
     const response = await fetch("/api/v1/ai/workbench/runs");
@@ -263,7 +265,7 @@ export function AgentCrmWorkbench({
 
   const run = async () => {
     if (!selected || !task.trim() || !modelConfigured) return;
-    if (delegateMission && (mode !== "act" || !scope.leadId || !acceptanceCriteria.trim())) {
+    if (missionEnabled && !acceptanceCriteria.trim()) {
       setError("委托商机任务需要选择商机、分级自治模式，并填写业务验收条件。");
       return;
     }
@@ -283,7 +285,7 @@ export function AgentCrmWorkbench({
           task,
           mode,
           ...(Object.keys(scope).length ? { scope } : {}),
-          ...(delegateMission ? { mission: {
+          ...(missionEnabled ? { mission: {
             goal: task.trim(),
             acceptanceCriteria: acceptanceCriteria.trim(),
             ...(observableChecks.length ? { acceptanceContract: { revision: 1, checks: observableChecks } } : {}),
@@ -606,6 +608,7 @@ export function AgentCrmWorkbench({
                 setObjectKind(event.target.value as ObjectKind);
                 setScope({});
                 setScopeLabel("");
+                setDelegateMission(false);
               }}
             >
               <option value="contact">联系人</option>
@@ -628,6 +631,7 @@ export function AgentCrmWorkbench({
                 onClick={() => {
                   setScope({});
                   setScopeLabel("");
+                  setDelegateMission(false);
                 }}
                 className="underline"
               >
@@ -658,7 +662,11 @@ export function AgentCrmWorkbench({
               id="run-mode"
               className="rounded-md border bg-background px-3 py-2 text-sm"
               value={mode}
-              onChange={(event) => setMode(event.target.value as "inspect" | "act")}
+              onChange={(event) => {
+                const nextMode = event.target.value as "inspect" | "act";
+                setMode(nextMode);
+                if (nextMode !== "act") setDelegateMission(false);
+              }}
             >
               <option value="inspect">只读检查</option>
               <option value="act">分级自治（可逆写入自动执行）</option>
@@ -670,17 +678,17 @@ export function AgentCrmWorkbench({
             placeholder="例如：找出停滞商机并建议明天的跟进计划…"
             className="min-h-24 w-full resize-y rounded-lg border bg-background p-3 text-sm focus:ring-2 focus:ring-ring"
           />
-          {mode === "act" && scope.leadId && (
+          {canDelegateMission && (
             <div className="space-y-2 rounded-md border p-3 text-sm">
               <label className="flex items-center gap-2 font-medium">
                 <input
                   type="checkbox"
-                  checked={delegateMission}
+                  checked={missionEnabled}
                   onChange={(event) => setDelegateMission(event.target.checked)}
                 />
                 建立商机业务任务
               </label>
-              {delegateMission && (
+              {missionEnabled && (
                 <>
                   <input
                     aria-label="业务验收条件"
