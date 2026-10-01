@@ -1,7 +1,8 @@
 /* Fictional fixtures, plus minimized excerpts of committed historical reports. */
 (function (root) {
   'use strict';
-  const ref = 'fc80b14dc88406ab6f5e6ec3ed9ca61d632c0674';
+  const ref = '36a3af1e7f3488a8df0a494b3c8f4f4661d32a95';
+  const historicalRef = 'fc80b14dc88406ab6f5e6ec3ed9ca61d632c0674';
   const source = path => 'https://github.com/helsome/AiNativeCrm/blob/' + ref + '/' + path;
   const fixtures = {
     schemaVersion: 1, sourceRef: ref, scenarioId: 'starbridge-policy-v1',
@@ -21,7 +22,7 @@
     ],
     capabilities: [
       { name: 'Wiki / RAG', path: 'lib/ai/knowledge/busca.ts', boundary: '生产：受权来源列表 + 组织范围 + embeddings/RPC；这里：执行本地关键词排序与来源过滤，不做向量搜索。' },
-      { name: '组织记忆', path: 'lib/agent-engine/agent/org-memory.ts', boundary: '生产：不可变版本 + 当前指针，每轮读取；这里：本地 v1/v2 快照。expectedVersion 冲突拒绝是实验室保护，不代表现有发布 API 已实现此契约。' },
+      { name: '组织记忆', path: 'lib/agent-engine/agent/org-memory.ts', boundary: '生产：初始/恢复/专家共享已发布母文档与 active entries，恢复重读当前版本；这里：本地 v1/v2 快照。expectedVersion 冲突拒绝是实验室保护，不代表现有发布 API 已实现此契约。' },
       { name: 'Durable runtime', path: 'tests/unit/workbench-durable-queue.test.ts', boundary: '生产：数据库任务队列、checkpoint、恢复；这里：localStorage 恢复，不是服务端持久队列或进程崩溃恢复测试。' },
       { name: 'Eval', path: 'lib/ai/evals/evaluate-run.ts', boundary: '生产：版本化 profile、确定性规则及可选语义 Judge；这里：显式本地断言，不能代替模型质量评估。' },
       { name: 'Golden corpus', path: 'tests/agent-runtime/fixtures/workbench-eval-golden.ts', boundary: '仓库包含真实运行派生的缩减 fixture 和合成回归 fixture。此页不把重建的事件当作原始完整 trace。' }
@@ -29,8 +30,8 @@
     historical: {
       kind: 'committed_report_excerpt', capturedDate: '2026-09-28', provider: 'opencode', model: 'space-bunny-free',
       reportTitle: 'DuoAgent Runtime 与 Eval 真实模型验收', sourcePath: 'docs/testing/multi-agent-eval-real-run-2026-09-28.md',
-      sourceUrl: source('docs/testing/multi-agent-eval-real-run-2026-09-28.md'),
-      reportRunId: 'b030b8d5-ba15-4168-8407-1ad886ce1743', mode: 'inspect', sourceRef: ref,
+      sourceUrl: 'https://github.com/helsome/AiNativeCrm/blob/' + historicalRef + '/docs/testing/multi-agent-eval-real-run-2026-09-28.md',
+      reportRunId: 'b030b8d5-ba15-4168-8407-1ad886ce1743', mode: 'inspect', sourceRef: historicalRef,
       limitations: '仓库已提交验收报告的最小摘录；本次未重新调用模型、查询原数据库或验证报告所述运行。没有完整原始事件 JSON；不补造逐条工具输入/输出，不展示客户正文或内部推理。',
       specialists: [
         { name: 'customer_evidence', status: 'completed', toolCalls: 3, claims: 29, tools: ['crm_get_contact','crm_list_conversations','crm_get_conversation_history'], outputSummary: '报告记载：历史消息接口为空，客户沟通证据存在缺口。' },

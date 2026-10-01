@@ -2,6 +2,20 @@
 
 This is a standalone, buildless browser example. Open `dist/index.html` through any ordinary static file server. It does not start the real Next.js CRM, Supabase, an agent worker, a model, or a messaging integration. All customers, prices, dates, approvals and local tasks are fictional.
 
+## Inspect the current production-code changes
+
+Click **更新检查 · 36a3af1** in the toolbar, **证据与版本** in Agent chat, or **检查本次更新** in the welcome area. This opens an inspection drawer alongside the retained chat-first UI. All its data is synthetic and explicitly separate from the current simulated chat Run.
+
+The inspection drawer is mapped to production feature commit `36a3af1e7f3488a8df0a494b3c8f4f4661d32a95` on `feat/chat-first-workbench-2026-10-01`:
+
+- Knowledge evidence shows current, superseded and revoked-source examples, with exact synthetic source/index/chunk JSON. Revocation hides the excerpt rather than retaining a historical permission grant
+- Organization memory demonstrates a resumed turn reading a newer published revision; the customer checkpoint is read-only and bounded by organization, contact, conversation, service revision and demanda revision. Unavailable/empty/changed or anonymized-contact examples never expose the previous checkpoint
+- Eval shows all seven production dimension labels and individual reason/code examples. A missing-material state refuses to display a score. It does not run the production evaluator or semantic Judge
+- Mission customer-send controls require a reason and update the same existing local demo Mission. Investigation remains available. Pausing expires pending/approved local proposal state; resuming does not revive it. Completed Missions do not expose the control. This is not general Run pause or external sending
+- Code/configuration links are immutable and spell out model, embeddings, indexing, source permissions, memory, workers and channel prerequisites. The historical model report remains pinned to its original `fc80b14` reference
+
+`inspection.js` is an independent inspection adaptation, not a compiled React Workbench or proof of the real API response. Publishing the Site does not start Next.js, Supabase, the agent worker, or any provider. Refresh resets the inspection examples and ordinary CRM state; only the existing lab has browser persistence.
+
 ## Use the laboratory
 
 1. Click **能力实验室** in the toolbar (or the Agent chat welcome area).
@@ -74,6 +88,7 @@ npm run test:engine
 - `full-smoke.cjs`: 62 routes, navigation, handlers, state transitions and generated route coverage
 - `chat-dom.cjs`: real DOM interaction, conversation turns, keyboard/IME, escaping, drawer focus, delegation, cancellation and CSS parsing
 - `runtime-lab.cjs`: executable engine, all workflow gates, reload checkpoints, no duplicate tasks, missing-Wiki recovery, failure control, reset isolation and evidence provenance
+- `inspection-dom.cjs`: code-aligned new panels, source withdrawal/staleness, customer boundary redaction, Eval missing-material refusal, scoped pause/resume and expired approvals, source provenance, focus, 62-route entry preservation and zero HTTP transport
 - `runtime-lab-dom.cjs`: real DOM workflow/reload/reset, trace/evidence/replay controls, provenance display, keyboard tabs/focus, transport-call tripwires and responsive CSS containment
 
 These tests use deterministic Node and jsdom harnesses, not a live browser rendering engine. Responsive/mobile CSS is parsed and structurally asserted, but this does not verify pixel layout, touch scrolling or a real phone keyboard. Browser screenshot QA was not run: the task environment had a previously verified browser-process/preview limitation, and no alternate route was used to bypass it. No live model, live CRM backend, complete root unit suite or production queue recovery test is claimed.
