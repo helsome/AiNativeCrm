@@ -12,6 +12,7 @@ import {
   getConversationHandler,
 } from "@/app/api/v1/conversations/_handler";
 import { listMessagesHandler } from "@/app/api/v1/messages/_handler";
+import { loadCustomerMemoryForConversation } from "@/lib/agent-engine/agent/customer-memory";
 import { getQueuePositions } from "@/lib/routing/queue";
 import { resolveUserNames } from "./_users";
 import type { McpToolDefinition } from "../types";
@@ -172,7 +173,8 @@ const historyInputShape = {
 export const crmGetConversationHistory: McpToolDefinition<typeof historyInputShape> = {
   name: "crm_get_conversation_history",
   description:
-    "Carrega historico de mensagens de uma conversa. Use para dar contexto ao agente sem inflar o system prompt.",
+    "Carrega histórico e memória durável de uma conversa, com compromissos, objeções, próxima ação e " +
+    "revisão do checkpoint do atendimento atual. Memória somente leitura; indisponível não autoriza inferir fatos.",
   inputSchema: historyInputShape,
   category: "read",
   requiresRole: "agent",
@@ -188,6 +190,9 @@ export const crmGetConversationHistory: McpToolDefinition<typeof historyInputSha
       input.conversation_id,
       { limit: input.limit, cursor: input.cursor },
     );
+    const customerMemory = await loadCustomerMemoryForConversation(
+      ctx.supabase, ctx.organizationId, input.conversation_id,
+    );
     return {
       messages: result.messages.map((m) => ({
         id: m.id,
@@ -199,6 +204,7 @@ export const crmGetConversationHistory: McpToolDefinition<typeof historyInputSha
         sent_at: m.sent_at,
         status: m.status,
       })),
+      customer_memory: customerMemory,
       cursor: result.cursor,
       has_more: result.has_more,
     };

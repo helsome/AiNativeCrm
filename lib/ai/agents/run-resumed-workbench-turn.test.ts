@@ -5,7 +5,11 @@ const mocks = vi.hoisted(() => ({
   model: vi.fn(),
   reversible: vi.fn(),
   event: vi.fn(async () => undefined),
-  query: vi.fn(async () => ({ rows: [] })),
+  query: vi.fn(async (sql: string) => ({ rows: sql.includes("from org_memory_pointers") ? [{
+    id: "memory-version-4", version_id: "memory-version-4", organization_id: "org-1", version_number: 4,
+    content: "Current published policy for resumed runs", created_at: "2026-10-01T00:00:00Z",
+    published_at: "2026-10-01T00:00:00Z",
+  }] : [] })),
   stopForDirection: vi.fn(async (
     _pool: unknown,
     _input: { organizationId: string; missionId: string; runId: string },
@@ -193,6 +197,16 @@ describe("resumed workbench turn", () => {
     });
 
     expect(mocks.model).toHaveBeenCalledTimes(3);
+    for (const [, input] of mocks.model.mock.calls) {
+      expect(input.system).toContain("Current published policy for resumed runs");
+      expect(input.system).toContain("Revisão: sha256:");
+    }
+    expect(mocks.event).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      type: "context_loaded", payload: expect.objectContaining({
+        orgMemoryVersionId: "memory-version-4", orgMemoryVersionNumber: 4,
+        memoryResolution: "current_published",
+      }),
+    }));
     expect(mocks.reversible).toHaveBeenCalledTimes(2);
     expect(modelInputs[1]?.some((message) => message.role === "assistant" && message.content === "已提议更新 1")).toBe(true);
     expect(modelInputs[2]?.some((message) => message.role === "assistant" && message.content === "已提议更新 2")).toBe(true);

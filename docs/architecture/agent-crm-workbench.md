@@ -271,3 +271,27 @@ not physical browser layout, live model behavior or a fresh-Supabase E2E journey
 The existing opt-in real-model/real-tenant E2E selectors follow the new controls, but were not run
 for this port. Full unit/CI execution is intentionally not claimed because the existing full
 suite includes live external-model paths; required live/browser checks remain a maintainer gate.
+
+## Real-runtime parity wiring (2026-10-01)
+
+The versioned organization-memory assembly in `lib/agent-engine/agent/org-memory.ts` is shared by
+inbound, the MCP read and both initial/resumed Workbench model calls. Specialists inherit that
+system context. Resumption resolves the current published policy and records its content-free
+revision in `context_loaded`; it does not claim an old frozen policy snapshot.
+
+`crm_get_conversation_history` adds read-only customer memory through `customer-memory.ts` only
+for the current organization/contact/conversation/service/demanda boundary. It rechecks that
+boundary after reading, and never falls back to a different conversation or a contact-wide record.
+
+RAG reads immutable chunk provenance after vector retrieval. The common evidence parser preserves
+nested locators into specialist state. Source revisions and chunk excerpt identity are checked
+separately to avoid reporting complementary paragraphs as contradictions. The observed-evidence
+projection re-authorizes current runnable Agent source IDs (including built-in drafts), source
+activation and memory visibility before rendering snippets; raw runtime messages remain private.
+The precise source endpoint supports version/chunk locators and labels noncurrent indexes.
+
+MissionSendControl calls the existing atomic send-policy command with a reason and replay key.
+It controls customer sending only, never claims to suspend all execution or recall in-flight
+messages. Eval refuses incomplete material reads and the UI exposes deterministic finding reasons.
+See [the capability/setup matrix](../design/crm-real-api-parity-2026-10-01.md) for tested boundaries
+and the deliberately separate local demonstration semantics.

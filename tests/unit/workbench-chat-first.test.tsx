@@ -383,3 +383,30 @@ describe("chat-first workbench with real API contracts, entirely offline fixture
     expect(screen.getByRole("button", { name: /已提交的任务.*completed/ })).toBeInTheDocument();
   });
 });
+
+describe("real runtime evidence and evaluation visibility", () => {
+  it("renders observed snippets, exact source links, index staleness and computed finding reasons", async () => {
+    const record = detail("evidence-run", "核对政策");
+    Object.assign(record, { observed_evidence: [{ id: "chunk", namespace: "organization_wiki", title: "交期 Wiki",
+      excerpt: "交期需要负责人核实", source_id: "source", revision: "observed-index", revision_kind: "index_version",
+      index_status: "superseded", uri: "/api/v1/ai/knowledge/sources/source/trechos?version_id=observed-index&chunk_id=chunk", position: 1 }] });
+    records.set(record.id, record);
+    const priorFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => String(input).endsWith("/evaluation")
+      ? Promise.resolve(json({ verdict: "needs_review", score: 70, profileKey: "actual-profile",
+        dimensions: [{ key: "knowledge_grounding", label: "知识依据", verdict: "needs_review", score: 50,
+          findings: [{ code: "knowledge_evidence_empty", message: "需要核对引用版本。" }] }],
+        summary: { toolCalls: 2, toolErrors: 0, knowledgeSearches: 1, groundedEvidenceItems: 1, specialistRuns: 0, specialistFailures: 0, structuredClaims: 0 },
+        semanticJudge: { status: "not_run" } })) : priorFetch(input, init)));
+    window.history.replaceState(null, "", "/app/ai/workbench?run=evidence-run");
+    const user = setup();
+    await screen.findByText("真实接口结果：核对政策");
+    await openDetails(user);
+    expect(screen.getByRole("region", { name: "实际读取的知识证据" })).toHaveTextContent("交期需要负责人核实");
+    expect(screen.getByText(/索引已有更新，请重查/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "查看来源", hidden: true })).toHaveAttribute("href", "/api/v1/ai/knowledge/sources/source/trechos?version_id=observed-index&chunk_id=chunk");
+    await user.click(screen.getByText(/知识依据 · needs_review/));
+    expect(screen.getByText("需要核对引用版本。")).toBeVisible();
+    expect(screen.getByText("knowledge_evidence_empty")).toBeVisible();
+  });
+});

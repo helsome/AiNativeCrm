@@ -1,3 +1,5 @@
+import { followupProposalPreview } from "./workbench-proposal-preview";
+import { composeSystemPrompt, loadOrgMemory, orgMemoryProvenance, renderOrgMemory } from "@/lib/agent-engine/agent/org-memory";
 import type { JobRow } from "@/lib/agent-engine/queue/queue";
 import type { Pool } from "pg";
 import { loadAgentVersionConfig } from "@/lib/agent-engine/agent/agent-config";
@@ -257,6 +259,18 @@ export async function runWorkbenchStartJob(
       getRequestPool(), job.organization_id, run.agent_id, runtime.versionId,
     );
     if (!modelAgentConfig) throw new Error("workbench_agent_config_missing");
+    const orgMemory = await loadOrgMemory(getRequestPool(), job.organization_id);
+    modelAgentConfig.systemPrompt = composeSystemPrompt({
+      playbookPrompt: modelAgentConfig.systemPrompt,
+      orgMemoryBlock: renderOrgMemory(orgMemory),
+      skillIndex: "",
+    });
+    await beforeSideEffect();
+    await appendWorkbenchEvent(admin, {
+      organizationId: job.organization_id, runId,
+      type: "context_loaded",
+      payload: { ...orgMemoryProvenance(orgMemory), memoryResolution: "current_published" },
+    });
     modelAgentConfig.pipelineIds = scope.pipelineId ? [scope.pipelineId] : [];
     const { data: agentMetadata, error: agentMetadataError } = await admin
       .from("ai_agents")
@@ -629,6 +643,7 @@ export async function runWorkbenchStartJob(
               tool_args: proposal.arguments as never,
               preview: {
                 requiresHumanConfirmation: true,
+                ...followupProposalPreview(proposal.tool, proposal.arguments),
                 ...(proposal.tool === "send_message" ? { externalEffect: "customer_message" } : {}),
                 ...(proposal.tool === ASK_INTERNAL_COLLEAGUE_TOOL
                   ? { externalEffect: "feishu_internal_question",

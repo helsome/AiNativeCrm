@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { MissionSendControl } from "./MissionSendControl";
 import {
   Sheet,
   SheetContent,
@@ -88,6 +89,11 @@ type Detail = Run & {
   }>;
   usage?: { inputTokens: number; outputTokens: number; costCents: number; calls: number };
   evaluation?: EvaluationReport;
+  observed_evidence?: Array<{
+    id: string; namespace: string; title: string; excerpt: string; source_id: string;
+    revision: string | null; revision_kind: string; index_status: string | null;
+    uri: string | null; position?: number;
+  }>;
 };
 type EvaluationReport = {
   verdict: "pass" | "fail" | "needs_review" | "not_run";
@@ -154,6 +160,7 @@ const EVENT_LABELS: Record<string, string> = {
 const TOOL_LABELS: Record<string, string> = {
   crm_request_human_handoff: "请求转交人工",
   crm_update_lead: "更新商机字段",
+  crm_schedule_followup: "安排客户跟进",
   send_message: "发送客户回复",
   ask_internal_colleague: "向飞书同事提问",
 };
@@ -1043,6 +1050,12 @@ export function AgentCrmWorkbench({
                 <a href="/app/ai/providers" className="block text-sm underline">
                   模型与凭据设置
                 </a>
+                <a href="/app/ai/knowledge/sources" className="block text-sm underline">
+                  知识来源与索引设置
+                </a>
+                <p className="text-xs text-muted-foreground">
+                  Wiki 检索还需要可用的 embedding 凭据和已完成的来源索引；仅配置聊天模型不代表知识库已就绪。
+                </p>
               </fieldset>
             ) : (
               <>
@@ -1067,6 +1080,14 @@ export function AgentCrmWorkbench({
                             客户发送已被负责人暂停；旧审批不能继续发送。
                           </p>
                         )}
+                        <MissionSendControl key={detail.mission.id} mission={detail.mission}
+                          onUpdated={async (paused) => {
+                            const runId = detail.id;
+                            setDetail((current) => current?.id === runId && current.mission
+                              ? { ...current, mission: { ...current.mission, customer_send_paused: paused } } : current);
+                            const updated = await fetchDetail(runId);
+                            setDetail((current) => current?.id === runId ? updated : current);
+                          }} />
                         {detail.mission.acceptance_contract?.checks.map((check) => (
                           <p key={check.kind} className="text-xs text-muted-foreground">
                             可观察条件：
@@ -1127,6 +1148,14 @@ export function AgentCrmWorkbench({
                                   ? "问题尚未发送。批准后进入飞书发送队列；送达和同事回复会分别记录，任务不会因此自动完成。"
                                   : "Agent 未执行此动作。批准后由 CRM Harness 再次校验并调用。"}
                             </p>
+                            {proposal.tool_name === "crm_schedule_followup" && (
+                              <div className="mt-2 rounded-md bg-muted p-2 text-xs">
+                                <p>目标 {String(proposal.preview.targetKind ?? "待核对")}：{String(proposal.preview.targetId ?? "未记录")}</p>
+                                <p>时间：{typeof proposal.preview.inHours === "number"
+                                  ? `执行批准后 ${proposal.preview.inHours} 小时`
+                                  : String(proposal.preview.promisedAt ?? "未记录，请先核对")}</p>
+                              </div>
+                            )}
                             {proposal.tool_name === "ask_internal_colleague" &&
                               typeof proposal.preview.question === "string" && (
                                 <div className="mt-2 rounded-md bg-muted p-2 text-xs">
@@ -1244,13 +1273,21 @@ export function AgentCrmWorkbench({
                         </div>
                         <div className="mt-2 space-y-1">
                           {detail.evaluation.dimensions.map((dimension) => (
-                            <div
-                              key={dimension.key}
-                              className="flex justify-between gap-3 text-muted-foreground"
-                            >
-                              <span>{dimension.label}</span>
-                              <span>{dimension.verdict}</span>
-                            </div>
+                            <details key={dimension.key} className="rounded border p-2">
+                              <summary className="cursor-pointer text-muted-foreground">
+                                {dimension.label} · {dimension.verdict}
+                                {dimension.score === null ? "" : ` · ${dimension.score}`}
+                              </summary>
+                              {dimension.findings.length > 0 ? (
+                                <ul className="mt-2 space-y-1">
+                                  {dimension.findings.map((finding) => (
+                                    <li key={finding.code}>{finding.message}
+                                      <span className="block text-[10px] text-muted-foreground">{finding.code}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : <p className="mt-2 text-muted-foreground">此项检查未发现问题；不代表业务结果已验收。</p>}
+                            </details>
                           ))}
                         </div>
                         <p className="mt-2 text-muted-foreground">
@@ -1340,6 +1377,26 @@ export function AgentCrmWorkbench({
                       ))}
                     </div>
                   </details>
+                )}
+                {Boolean(detail?.observed_evidence?.length) && (
+                  <section className="space-y-3 rounded-lg border p-3 text-sm" aria-label="实际读取的知识证据">
+                    <h3 className="font-semibold">实际读取的知识证据</h3>
+                    <p className="text-xs text-muted-foreground">来自本次运行成功工具观察，已重新核对当前来源权限。索引版本不等于商业政策批准。</p>
+                    {detail!.observed_evidence!.map((item) => (
+                      <details key={`${item.id}:${item.revision}`} className="rounded border p-2">
+                        <summary className="cursor-pointer font-medium">{item.title}
+                          {item.index_status === "superseded" ? " · 索引已有更新，请重查" : ""}
+                        </summary>
+                        <p className="mt-2 whitespace-pre-wrap break-words">{item.excerpt}</p>
+                        <p className="mt-2 break-all text-xs text-muted-foreground">
+                          {item.revision_kind === "index_version" ? "索引版本" : "记忆快照"}：{item.revision ?? "未记录"}
+                          {item.position === undefined ? "" : ` · 片段 ${item.position + 1}`}
+                        </p>
+                        <p className="break-all text-xs text-muted-foreground">证据 ID：{item.id}</p>
+                        {item.uri && <a href={item.uri} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs underline">查看来源</a>}
+                      </details>
+                    ))}
+                  </section>
                 )}
                 {detail?.result_document && (
                   <section

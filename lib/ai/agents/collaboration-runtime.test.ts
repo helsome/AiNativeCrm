@@ -296,3 +296,28 @@ describe("bounded Agent collaboration runtime", () => {
     );
   });
 });
+
+describe("Wiki fragment conflict identity", () => {
+  const evidence = (id: string, excerpt: string, revision = "v1") => ({
+    id, namespace: "organization_wiki" as const, kind: "wiki_page" as const,
+    title: "Wiki", excerpt, locator: { provider: "local_pgvector", sourceId: "source", revision },
+  });
+  const results = (second: ReturnType<typeof evidence>): AgentSpecialistResult[] => [
+    { ...completed(), childRunId: "a", specialistKey: "a", evidence: [evidence("chunk-1", "Price") ] },
+    { ...completed(), childRunId: "b", specialistKey: "b", evidence: [second] },
+  ];
+  it("does not report complementary paragraphs as conflicting business facts", async () => {
+    const { detectCollaborationConflicts } = await import("./collaboration-runtime");
+    expect(detectCollaborationConflicts(results(evidence("chunk-2", "Delivery")))).toEqual([]);
+  });
+  it("flags changed excerpts of the same versioned chunk", async () => {
+    const { detectCollaborationConflicts } = await import("./collaboration-runtime");
+    expect(detectCollaborationConflicts(results(evidence("chunk-1", "Different price"))))
+      .toEqual([expect.objectContaining({ code: "evidence_disagreement" })]);
+  });
+  it("still flags different source revisions even when reindexing created new chunk IDs", async () => {
+    const { detectCollaborationConflicts } = await import("./collaboration-runtime");
+    expect(detectCollaborationConflicts(results(evidence("chunk-new", "New price", "v2"))))
+      .toEqual([expect.objectContaining({ code: "stale_state" })]);
+  });
+});

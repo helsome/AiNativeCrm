@@ -1,3 +1,5 @@
+import { followupProposalPreview } from "./workbench-proposal-preview";
+import { composeSystemPrompt, loadOrgMemory, orgMemoryProvenance, renderOrgMemory } from "@/lib/agent-engine/agent/org-memory";
 import { appendWorkbenchEvent } from "@/lib/ai/agents/workbench-events";
 import {
   loadMissionDirectionContextProbe, persistMissionRunMessagesAndDirectionAck,
@@ -137,6 +139,18 @@ export async function runResumedWorkbenchTurn(input: {
       getRequestPool(), organizationId, input.agentId, input.versionId,
     );
     if (!agentConfig) throw new Error("workbench_agent_config_missing");
+    const orgMemory = await loadOrgMemory(getRequestPool(), organizationId);
+    agentConfig.systemPrompt = composeSystemPrompt({
+      playbookPrompt: agentConfig.systemPrompt,
+      orgMemoryBlock: renderOrgMemory(orgMemory),
+      skillIndex: "",
+    });
+    await input.beforeSideEffect?.();
+    await appendWorkbenchEvent(admin, {
+      organizationId: organizationId, runId,
+      type: "context_loaded",
+      payload: { ...orgMemoryProvenance(orgMemory), memoryResolution: "current_published" },
+    });
     agentConfig.pipelineIds = input.scope.pipelineId ? [input.scope.pipelineId] : [];
     const mcp = await buildMcpTurnTools(
       deps.crmCfg,
@@ -350,6 +364,7 @@ export async function runResumedWorkbenchTurn(input: {
             tool_args: proposal.arguments as never,
             preview: {
               requiresHumanConfirmation: true,
+                ...followupProposalPreview(proposal.tool, proposal.arguments),
               ...(proposal.tool === ASK_INTERNAL_COLLEAGUE_TOOL
                 ? { externalEffect: "feishu_internal_question",
                     recipientUserId: (proposal.arguments as { recipientUserId: string }).recipientUserId,

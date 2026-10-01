@@ -27,7 +27,10 @@ export type CrmAgentEventType =
 
 const EVENT_FIELDS: Record<CrmAgentEventType, readonly string[]> = {
   run_started: ["agentId", "mode", "taskLength", "evalProfile", "knowledgeNamespaces"],
-  context_loaded: ["contactId", "leadId", "conversationId", "pipelineId"],
+  context_loaded: [
+    "contactId", "leadId", "conversationId", "pipelineId",
+    "orgMemoryRevision", "orgMemoryVersionId", "orgMemoryVersionNumber", "orgMemoryEntriesCount", "memoryResolution",
+  ],
   model_decision: [
     "toolResultCount",
     "proposedToolCount",

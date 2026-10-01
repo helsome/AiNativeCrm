@@ -45,7 +45,7 @@ The report was read, not re-executed or independently validated against its data
 
 The golden corpus (`tests/agent-runtime/fixtures/workbench-eval-golden.ts` in the main repo) combines real-run-derived minimized fixtures with synthetic regression cases. Those are not treated as unmodified raw traces. No new LLM trace is synthesized or mislabeled.
 
-The fictional Starbridge scenario matches `docs/design/llm-wiki-example/` in the same PR. Its source IDs, policy versions and customer requests are illustrative, not real CRM object locators. The production-source links in the lab point to immutable inspected files and describe the gap between the production capability and this local adaptation.
+The fictional Starbridge scenario matches `docs/design/llm-wiki-example/` on the same branch. Its source IDs, policy versions and customer requests are illustrative, not real CRM object locators. The production-source links in the lab point to immutable inspected files and describe the gap between the production capability and this local adaptation.
 
 ## Existing interface preserved
 
@@ -81,3 +81,13 @@ These tests use deterministic Node and jsdom harnesses, not a live browser rende
 ## Architecture boundary
 
 This example is isolated infrastructure/demo code. It does not replace any core CRM route or remove a shipped capability. Input: fictional customer requirements and human controls. Output: visible trace, draft, internal fixture task and separate business state. Failures become visible blockers; retry and source repair change subsequent execution. There is no external action or production persistence to migrate.
+
+## Real API implementation after this demo
+
+See [the real-runtime capability and setup matrix](../../docs/design/crm-real-api-parity-2026-10-01.md).
+The production path now shares versioned organization memory across initial/resumed model turns,
+reads conversation-bound customer checkpoints, retains actual RAG chunk/index provenance, shows
+re-authorized observed evidence and computed Eval reasons, and exposes Mission customer-send
+pause/resume. The lab's generic whole-workflow pause, arbitrary customer-memory CAS, business-policy
+validity/supersession fixtures and raw local JSON export still have different production semantics.
+A chat-model Key alone does not provision embeddings, indexed sources, workers or customer channels.

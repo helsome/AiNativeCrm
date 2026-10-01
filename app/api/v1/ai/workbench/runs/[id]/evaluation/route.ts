@@ -65,13 +65,7 @@ async function loadEvaluationMaterial(
   if (runError) throw new EvaluationMaterialError("read_failed", "无法读取评测运行。");
   if (!run) throw new EvaluationMaterialError("not_found", "run 不存在。");
 
-  const [
-    { data: agent },
-    { data: events },
-    { data: proposals },
-    { data: state },
-    { data: collaborationRuns },
-  ] = await Promise.all([
+  const materials = await Promise.all([
     admin
       .from("ai_agents")
       .select("id, origin, builtin_key")
@@ -104,13 +98,18 @@ async function loadEvaluationMaterial(
       .order("created_at", { ascending: true }),
   ]);
 
+  if (materials.some((material) => material.error))
+    throw new EvaluationMaterialError("read_failed", "评测材料读取不完整，无法给出可信评分。");
+  const [{ data: agent }, { data: events }, { data: proposals }, { data: state },
+    { data: collaborationRuns }] = materials;
+
   const definition =
     agent?.origin === "builtin"
       ? BUILTIN_AGENTS.find((candidate) => candidate.key === agent.builtin_key)
       : undefined;
   const profile = resolveAgentEvalProfile(definition?.evalProfile);
   const childIds = (collaborationRuns ?? []).map((child) => child.id);
-  const [{ data: childStates }, { data: childEvents }] = childIds.length
+  const childMaterials = childIds.length
     ? await Promise.all([
         admin
           .from("ai_agent_run_states")
@@ -124,7 +123,18 @@ async function loadEvaluationMaterial(
           .in("run_id", childIds)
           .order("created_at", { ascending: true }),
       ])
-    : [{ data: [] }, { data: [] }];
+    : [{ data: [], error: null }, { data: [], error: null }];
+  if (childMaterials.some((material) => material.error))
+    throw new EvaluationMaterialError("read_failed", "专家评测材料读取不完整。");
+  const [{ data: childStates }, { data: childEvents }] = childMaterials;
+  if ((childStates ?? []).some((child) => !parseRuntimeMessages(child.messages)))
+    throw new EvaluationMaterialError("state_corrupt", "专家运行状态无法安全解析。");
+  if (!state && ["completed", "partial"].includes(run.status))
+    throw new EvaluationMaterialError("state_corrupt", "已结束运行缺少持久化模型观察，无法给出可信评分。");
+  const childStateIds = new Set((childStates ?? []).map((child) => child.run_id));
+  if ((collaborationRuns ?? []).some((child) =>
+    ["completed", "partial"].includes(child.status) && !childStateIds.has(child.id)))
+    throw new EvaluationMaterialError("state_corrupt", "已结束专家运行缺少持久化模型观察。");
   const parsedRootMessages = parseRuntimeMessages(state?.messages);
   if (state && !parsedRootMessages)
     throw new EvaluationMaterialError("state_corrupt", "运行状态无法安全解析。");
