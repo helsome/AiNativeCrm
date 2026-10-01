@@ -36,15 +36,19 @@ test("CRM 情报员通过真实模型读取演示 CRM 并持久化完整运行�
   await page.waitForURL(/\/app\/ai\/workbench/, { timeout: 45_000 });
 
   await expect(page.getByRole("heading", { name: "Agent–CRM 工作台" })).toBeVisible();
-  await expect(page.getByText("真实模型 · 组织级权限 · 操作留痕")).toBeVisible();
-  await page.getByRole("button", { name: /CRM 情报员/ }).first().click();
+  await expect(
+    page.getByText("Enter 发送 · Shift+Enter 换行 · 每次发送创建独立运行，CRM 提供上下文"),
+  ).toBeVisible();
+  await page.getByLabel("内置 Agent").selectOption({ label: "CRM 情报员" });
   await page.locator("#run-mode").selectOption("inspect");
-  await page.locator("textarea").fill(
-    "请调用 crm_search_contacts 只读搜索工具，精确查找姓名‘林晓梅’，然后读取该联系人的资料和关联商机。报告 CRM 中能核实的姓名与商机阶段，并说明依据。只读，不要修改任何内容。",
-  );
+  await page
+    .locator("textarea")
+    .fill(
+      "请调用 crm_search_contacts 只读搜索工具，精确查找姓名‘林晓梅’，然后读取该联系人的资料和关联商机。报告 CRM 中能核实的姓名与商机阶段，并说明依据。只读，不要修改任何内容。",
+    );
   await page.getByRole("button", { name: "运行 Agent" }).click();
 
-  await expect(page.getByText("运行完成", { exact: true })).toBeVisible({ timeout: 150_000 });
+  await expect(page.getByText(/运行状态：completed/)).toBeVisible({ timeout: 150_000 });
 
   const listResponse = await page.request.get("/api/v1/ai/workbench/runs");
   expect(listResponse.ok()).toBeTruthy();
@@ -62,7 +66,13 @@ test("CRM 情报员通过真实模型读取演示 CRM 并持久化完整运行�
   };
   expect(detail.final_text?.trim().length ?? 0).toBeGreaterThan(0);
   expect(detail.events.map((event) => event.event_type)).toEqual(
-    expect.arrayContaining(["run_started", "context_loaded", "model_decision", "tool_completed", "run_completed"]),
+    expect.arrayContaining([
+      "run_started",
+      "context_loaded",
+      "model_decision",
+      "tool_completed",
+      "run_completed",
+    ]),
   );
   const completedTools = detail.events
     .filter((event) => event.event_type === "tool_completed")
@@ -94,7 +104,8 @@ test("销售运营 Agent 通过真实模型更新演示商机并使用业务补�
   expect(original, "演示组织应有林晓梅的 CRM 商机").toBeTruthy();
   const temporaryTitle = `${original!.label} [E2E reversible check]`;
 
-  await page.getByRole("button", { name: /销售运营 Agent/ }).click();
+  await page.getByLabel("内置 Agent").selectOption({ label: "销售运营 Agent" });
+  await page.getByRole("button", { name: "任务设置" }).click();
   await page.getByLabel("CRM 对象类型").selectOption("lead");
   const objectResults = page.waitForResponse((response) => {
     const url = new URL(response.url());
@@ -110,10 +121,13 @@ test("销售运营 Agent 通过真实模型更新演示商机并使用业务补�
   await expect(scopedLeadOption).toBeVisible();
   await scopedLeadOption.click();
   await expect(page.getByText(`目标对象：${original!.label}`, { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
   await page.locator("#run-mode").selectOption("act");
-  await page.locator("textarea").fill(
-    `只处理当前选中的商机。先读取它，再仅把标题改为“${temporaryTitle}”。只允许调用 crm_update_lead 修改 title，不要改阶段、金额、联系人或其他字段，不要创建任务或发送消息。完成后报告改动字段。`,
-  );
+  await page
+    .locator("textarea")
+    .fill(
+      `只处理当前选中的商机。先读取它，再仅把标题改为“${temporaryTitle}”。只允许调用 crm_update_lead 修改 title，不要改阶段、金额、联系人或其他字段，不要创建任务或发送消息。完成后报告改动字段。`,
+    );
   const runResponsePromise = page.waitForResponse(
     (response) =>
       response.url().endsWith("/api/v1/ai/workbench/runs") &&
@@ -125,7 +139,9 @@ test("销售运营 Agent 通过真实模型更新演示商机并使用业务补�
     throw new Error(
       `workbench_run_start_failed:${runResponse.status()}:request=${JSON.stringify(runResponse.request().postDataJSON())}:response=${JSON.stringify(await runResponse.json())}`,
     );
-  await expect(page.getByText(/运行完成|部分完成|运行失败/).first()).toBeVisible({ timeout: 210_000 });
+  await expect(page.getByText(/运行状态：(completed|partial|failed)/).first()).toBeVisible({
+    timeout: 210_000,
+  });
 
   const listResponse = await page.request.get("/api/v1/ai/workbench/runs");
   expect(listResponse.ok()).toBeTruthy();
@@ -149,8 +165,13 @@ test("销售运营 Agent 通过真实模型更新演示商机并使用业务补�
       "/api/v1/ai/workbench/objects?kind=lead&q=%5BE2E%20reversible%20check%5D",
     );
     expect(changedResponse.ok()).toBeTruthy();
-    const changedLeads = (await changedResponse.json()).data as Array<{ id: string; label: string }>;
-    expect(changedLeads.some((lead) => lead.id === original!.id && lead.label === temporaryTitle)).toBeTruthy();
+    const changedLeads = (await changedResponse.json()).data as Array<{
+      id: string;
+      label: string;
+    }>;
+    expect(
+      changedLeads.some((lead) => lead.id === original!.id && lead.label === temporaryTitle),
+    ).toBeTruthy();
 
     const undoResponse = await page.request.post(
       `/api/v1/ai/workbench/runs/${run!.id}/proposals/${proposal.id}/undo`,
@@ -187,36 +208,55 @@ test("客户沟通 Agent 的转人工提案必须经确认，拒绝后安全续�
     "/api/v1/ai/workbench/objects?kind=conversation&q=%E6%BC%94%E7%A4%BA%E5%AE%A2%E6%88%B7",
   );
   expect(conversationsResponse.ok()).toBeTruthy();
-  const conversations = (await conversationsResponse.json()).data as Array<{ id: string; label: string }>;
+  const conversations = (await conversationsResponse.json()).data as Array<{
+    id: string;
+    label: string;
+  }>;
   const conversation = conversations.find((item) => item.label.includes("演示客户"));
   expect(conversation, "demo:seed 应准备一条停止外部渠道的合成会话").toBeTruthy();
 
-  await page.getByRole("button", { name: /客户沟通 Agent/ }).click();
+  await page.getByLabel("内置 Agent").selectOption({ label: "客户沟通 Agent" });
+  await page.getByRole("button", { name: "任务设置" }).click();
   await page.getByLabel("CRM 对象类型").selectOption("conversation");
   const objectResults = page.waitForResponse((response) => {
     const url = new URL(response.url());
-    return url.pathname === "/api/v1/ai/workbench/objects" && url.searchParams.get("q") === "演示客户";
+    return (
+      url.pathname === "/api/v1/ai/workbench/objects" && url.searchParams.get("q") === "演示客户"
+    );
   });
   await page.getByLabel("搜索 CRM 对象").fill("演示客户");
   await objectResults;
-  await page.getByRole("button", { name: new RegExp(conversation!.label) }).first().click();
+  await page
+    .getByRole("button", { name: new RegExp(conversation!.label) })
+    .first()
+    .click();
+  await page.keyboard.press("Escape");
   await page.locator("#run-mode").selectOption("act");
-  await page.locator("textarea").fill(
-    "当前选中的演示会话预览明确显示客户要求真人客服。必须调用 crm_request_human_handoff 为这个精确 conversation_id 创建待确认提案；reason 用 customer_requested_human，urgency 用 high，客户诉求用中文简洁概述，target_user_id 留空由系统路由。该工具在 Harness 批准前不会执行转交。不得只写建议，不要声称已经转交。",
-  );
+  await page
+    .locator("textarea")
+    .fill(
+      "当前选中的演示会话预览明确显示客户要求真人客服。必须调用 crm_request_human_handoff 为这个精确 conversation_id 创建待确认提案；reason 用 customer_requested_human，urgency 用 high，客户诉求用中文简洁概述，target_user_id 留空由系统路由。该工具在 Harness 批准前不会执行转交。不得只写建议，不要声称已经转交。",
+    );
   const runResponsePromise = page.waitForResponse(
-    (response) => response.url().endsWith("/api/v1/ai/workbench/runs") && response.request().method() === "POST",
+    (response) =>
+      response.url().endsWith("/api/v1/ai/workbench/runs") &&
+      response.request().method() === "POST",
   );
   await page.getByRole("button", { name: "运行 Agent" }).click();
   const runResponse = await runResponsePromise;
   expect(runResponse.ok()).toBeTruthy();
   const run = (await runResponse.json()).data as { run_id: string };
   try {
-    await expect.poll(async () => {
-      const response = await page.request.get(`/api/v1/ai/workbench/runs/${run.run_id}`);
-      if (!response.ok()) return "unavailable";
-      return ((await response.json()).data as { status: string }).status;
-    }, { timeout: 210_000 }).toMatch(/^(awaiting_confirmation|completed|partial|failed)$/);
+    await expect
+      .poll(
+        async () => {
+          const response = await page.request.get(`/api/v1/ai/workbench/runs/${run.run_id}`);
+          if (!response.ok()) return "unavailable";
+          return ((await response.json()).data as { status: string }).status;
+        },
+        { timeout: 210_000 },
+      )
+      .toMatch(/^(awaiting_confirmation|completed|partial|failed)$/);
   } catch (error) {
     const latest = await page.request.get(`/api/v1/ai/workbench/runs/${run.run_id}`);
     if (latest.ok()) {
@@ -243,16 +283,23 @@ test("客户沟通 Agent 的转人工提案必须经确认，拒绝后安全续�
     { data: { decision: "reject", reason: "E2E 验证拒绝后不会触发 handoff" } },
   );
   expect(decisionResponse.ok()).toBeTruthy();
-  await expect.poll(async () => {
-    const response = await page.request.get(`/api/v1/ai/workbench/runs/${run.run_id}`);
-    if (!response.ok()) return "unavailable";
-    return ((await response.json()).data as { status: string }).status;
-  }, { timeout: 150_000 }).toBe("completed");
+  await expect
+    .poll(
+      async () => {
+        const response = await page.request.get(`/api/v1/ai/workbench/runs/${run.run_id}`);
+        if (!response.ok()) return "unavailable";
+        return ((await response.json()).data as { status: string }).status;
+      },
+      { timeout: 150_000 },
+    )
+    .toBe("completed");
   const finalResponse = await page.request.get(`/api/v1/ai/workbench/runs/${run.run_id}`);
   expect(finalResponse.ok()).toBeTruthy();
   const finalDetail = (await finalResponse.json()).data as typeof detail;
   expect(finalDetail.proposals.find((item) => item.id === proposal!.id)?.status).toBe("rejected");
-  expect(finalDetail.events.map((event) => event.event_type)).toContain("human_confirmation_received");
+  expect(finalDetail.events.map((event) => event.event_type)).toContain(
+    "human_confirmation_received",
+  );
   expect(finalDetail.events.map((event) => event.event_type)).not.toContain("crm_state_changed");
 });
 
@@ -264,23 +311,32 @@ test("CRM 主管 Agent 通过真实模型交叉读取商机和跟进队列", asy
   await page.getByRole("button", { name: /登录|Entrar/ }).click();
   await page.waitForURL(/\/app\/ai\/workbench/, { timeout: 45_000 });
 
-  await page.getByRole("button", { name: /CRM 主管 Agent/ }).click();
+  await page.getByLabel("内置 Agent").selectOption({ label: "CRM 主管 Agent" });
   await page.locator("#run-mode").selectOption("inspect");
-  await page.locator("textarea").fill(
-    "分别调用一次 crm_list_leads 和 crm_list_followups 获取概览，然后立即用两三句话总结一项有数据依据的运营风险。不要重复调用，不要修改 CRM。",
-  );
+  await page
+    .locator("textarea")
+    .fill(
+      "分别调用一次 crm_list_leads 和 crm_list_followups 获取概览，然后立即用两三句话总结一项有数据依据的运营风险。不要重复调用，不要修改 CRM。",
+    );
   const runResponsePromise = page.waitForResponse(
-    (response) => response.url().endsWith("/api/v1/ai/workbench/runs") && response.request().method() === "POST",
+    (response) =>
+      response.url().endsWith("/api/v1/ai/workbench/runs") &&
+      response.request().method() === "POST",
   );
   await page.getByRole("button", { name: "运行 Agent" }).click();
   const runResponse = await runResponsePromise;
   expect(runResponse.ok()).toBeTruthy();
   const run = (await runResponse.json()).data as { run_id: string };
-  await expect.poll(async () => {
-    const response = await page.request.get(`/api/v1/ai/workbench/runs/${run.run_id}`);
-    if (!response.ok()) return "unavailable";
-    return ((await response.json()).data as { status: string }).status;
-  }, { timeout: 210_000 }).toBe("completed");
+  await expect
+    .poll(
+      async () => {
+        const response = await page.request.get(`/api/v1/ai/workbench/runs/${run.run_id}`);
+        if (!response.ok()) return "unavailable";
+        return ((await response.json()).data as { status: string }).status;
+      },
+      { timeout: 210_000 },
+    )
+    .toBe("completed");
   const detailResponse = await page.request.get(`/api/v1/ai/workbench/runs/${run.run_id}`);
   expect(detailResponse.ok()).toBeTruthy();
   const detail = (await detailResponse.json()).data as {

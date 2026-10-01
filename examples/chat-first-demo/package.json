@@ -1,0 +1,12 @@
+{
+  "name": "pi-native-crm-chat-first-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Isolated no-key CRM browser demonstration; not the production backend",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node tests/smoke.cjs && node tests/full-smoke.cjs && node tests/chat-dom.cjs && node tests/runtime-lab.cjs && node tests/runtime-lab-dom.cjs",
+    "test:engine": "node tests/runtime-lab.cjs"
+  },
+  "devDependencies": { "jsdom": "30.0.1", "css-tree": "3.2.1" }
+}

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Exact standalone example files mirrored to the private Site checkout and GitHub PR",
+  "sourceReference": "fc80b14dc88406ab6f5e6ec3ed9ca61d632c0674",
+  "sha256": {
+    "README.md": "3786fddd22ae34f86abf58038839e4b667b56f2aaae828db02e53d96bc5240c3",
+    "dist/app.js": "1b65aee837813a71ad4c0e9835a9f6323f4e9a38099813a12d9fbce8ca26f6fe",
+    "dist/catalog.js": "27307ab43355601f7fd4b58d4125089e2c3692c2114d63fe7519a4e7247a5568",
+    "dist/demo-engine.js": "cb1fba112f20c638145ac6ebf2e072b5e0ffff868b625d7bdca65b90d547fc61",
+    "dist/demo-fixtures.js": "7d50da0e1c543de5045180e6b41716a2180930f39600ee3fa3e83ee80919a894",
+    "dist/demo-lab.css": "a6bac05e314af4a14229475e8a32b0bae9e7e7238846984c0258ca92fce35a34",
+    "dist/demo-lab.js": "8f4e05a669cecbcc612495f068d9112bb47cc35cbfe76fbef6bff6fa1f68c5c5",
+    "dist/full-ui.js": "cbe6bbac992a335007a700061ee8e9217b5a99305034d69795a47e0050b7213d",
+    "dist/index.html": "3916ba6c3fd0e7d6cfff4009d3faa86c7ebddc5728fd8bb7086576848af162ed",
+    "dist/style.css": "1d6964ae20a840469e13bdd5a01ee99f1e701e5d0be662ea6f175013b5359618",
+    "package.json": "ec3f61d3f3282ad8981d3ceb3f7f978d1f0a8154372722663b9f4423f74a08ab",
+    "tests/chat-dom.cjs": "4fc0454a4867e6425a68ae81ac15e25ca2c5b524379154c5fb8621c5570a0026",
+    "tests/coverage.json": "20b7ee446afb01e0fc398307f0ac2c2c6132a5f3965dc8280109e49300dd2f4f",
+    "tests/full-smoke.cjs": "0ff7729fc96aaa07f17b97c739d0d33c1abadfd0989ee7b36d6ba12e8152ed32",
+    "tests/runtime-lab-dom.cjs": "287e983ff32c50e7330d347636c45899f3827afdd82e5ec5fce291e24690f277",
+    "tests/runtime-lab.cjs": "5bc249ba8080937c44f1780191b0d3481214dcf3efc59f11d2c095141f1fc499",
+    "tests/smoke.cjs": "216f2f07384e04515f4fbbb51a17a9ea05c1dccfcf73b50428acda86687b3307"
+  }
+}

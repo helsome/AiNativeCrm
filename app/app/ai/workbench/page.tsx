@@ -8,7 +8,9 @@ import { AgentCrmWorkbench } from "./_components/AgentCrmWorkbench";
 
 export const dynamic = "force-dynamic";
 
-export default async function AgentCrmWorkbenchPage({ searchParams }: {
+export default async function AgentCrmWorkbenchPage({
+  searchParams,
+}: {
   searchParams: Promise<{ leadId?: string }>;
 }) {
   const user = await requireAuth();
@@ -17,13 +19,18 @@ export default async function AgentCrmWorkbenchPage({ searchParams }: {
   await ensureBuiltinAgents(org.orgId);
   const admin = createAdminClient();
   const { leadId } = await searchParams;
-  const requestedLeadId = typeof leadId === "string" &&
+  const requestedLeadId =
+    typeof leadId === "string" &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(leadId)
-    ? leadId : null;
+      ? leadId
+      : null;
   const { data: initialLead } = requestedLeadId
-    ? await admin.from("crm_leads")
+    ? await admin
+        .from("crm_leads")
         .select("id, title, pipeline_id")
-        .eq("organization_id", org.orgId).eq("id", requestedLeadId).maybeSingle()
+        .eq("organization_id", org.orgId)
+        .eq("id", requestedLeadId)
+        .maybeSingle()
     : { data: null };
   const { data: agents, error } = await admin
     .from("ai_agents")
@@ -46,24 +53,15 @@ export default async function AgentCrmWorkbenchPage({ searchParams }: {
     Boolean(llm.default_model.trim());
 
   return (
-    <main className="mx-auto w-full max-w-[1600px] px-5 py-6 lg:px-8">
-      <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="text-sm font-medium text-muted-foreground">Pi Native CRM</p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Agent–CRM 工作台</h1>
-          <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-            选一个内置 Agent，让它读取真实 CRM
-            上下文、提出下一步操作，并在同一处查看策略判断和数据变化。
-          </p>
-        </div>
-        <a className="text-sm underline underline-offset-4" href="/app/ai/providers">
-          模型与凭据设置
-        </a>
-      </header>
+    <section
+      aria-label="Agent–CRM 工作台"
+      className="mx-auto flex h-full min-h-0 w-full max-w-[1600px] flex-col"
+    >
+      <h1 className="sr-only">Agent–CRM 工作台</h1>
       {!modelConfigured && (
         <div
           role="status"
-          className="mb-5 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm"
+          className="mb-2 max-h-24 shrink-0 overflow-auto rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm"
         >
           先连接组织的真实模型，内置 Agent 可先查看但暂时不能运行。系统不会使用模拟模型。
         </div>
@@ -72,11 +70,15 @@ export default async function AgentCrmWorkbenchPage({ searchParams }: {
         <p role="alert">加载内置 Agent 失败，请刷新重试。</p>
       ) : (
         <AgentCrmWorkbench
-          initialLead={initialLead ? {
-            id: initialLead.id,
-            title: initialLead.title,
-            pipelineId: initialLead.pipeline_id,
-          } : null}
+          initialLead={
+            initialLead
+              ? {
+                  id: initialLead.id,
+                  title: initialLead.title,
+                  pipelineId: initialLead.pipeline_id,
+                }
+              : null
+          }
           canCopy={roleAtLeast(org.role, "admin")}
           agents={(agents ?? []).map((agent) => {
             const definition = BUILTIN_AGENTS.find((item) => item.key === agent.builtin_key);
@@ -91,6 +93,6 @@ export default async function AgentCrmWorkbenchPage({ searchParams }: {
           modelConfigured={modelConfigured}
         />
       )}
-    </main>
+    </section>
   );
 }

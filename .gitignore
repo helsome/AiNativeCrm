@@ -11,6 +11,9 @@ node_modules
 .next/
 out/
 dist/
+# Authored, buildless demo source; shipped independently from the Next.js app.
+!examples/chat-first-demo/dist/
+!examples/chat-first-demo/dist/**
 build/
 .turbo/
 .vercel/

@@ -22,10 +22,8 @@ test("CRM 情报员只读消费真实租户客户数据并持久化运行轨迹"
   await page.waitForURL(/\/app\/ai\/workbench/, { timeout: 45_000 });
 
   await expect(page.getByRole("heading", { name: "Agent–CRM 工作台" })).toBeVisible();
-  await page
-    .getByRole("button", { name: /CRM 情报员/ })
-    .first()
-    .click();
+  await page.getByLabel("内置 Agent").selectOption({ label: "CRM 情报员" });
+  await page.getByRole("button", { name: "任务设置" }).click();
   await page.getByLabel("CRM 对象类型").selectOption("contact");
 
   const objectResponse = page.waitForResponse((response) => {
@@ -44,6 +42,7 @@ test("CRM 情报员只读消费真实租户客户数据并持久化运行轨迹"
   await page.getByRole("button").filter({ hasText: contacts[0]!.label }).first().click();
 
   await expect(page.getByText(`目标对象：${contacts[0]!.label}`, { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
   await page.locator("#run-mode").selectOption("inspect");
   await page
     .locator("textarea")

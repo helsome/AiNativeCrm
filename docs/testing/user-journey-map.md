@@ -2853,3 +2853,18 @@ que dirige o browser resolviam `E2E_PORT` para valores **diferentes** — servid
 `page.goto` em outra, e `ERR_CONNECTION_REFUSED` com um servidor saudável no ar. O CI nunca
 pisou nisso porque o gerador não escreve `E2E_PORT`; quem monta bancada em porta própria,
 sim. Consertado pela ordem: publicar primeiro, decidir a porta depois.
+
+## Bancada chat-first — verificação parcial de 2026-10-01
+
+Escopo `[P1]`: `/app/ai/workbench`, sem alterar papéis, APIs ou navegação do CRM.
+`tests/unit/workbench-chat-first.test.tsx`, `workbench-delegation-state.test.tsx` e
+`workbench-viewport-shell.test.tsx` exercitam DOM real com APIs inteiramente em memória: campo
+sempre numa região não encolhível, mensagens com rolagem própria, teclado/IME, dois resultados,
+missão explícita, painéis/foco, histórico em execução, cancelar, aprovar/rejeitar e desfazer.
+`rodape-ocupado-durante-a-chamada.test.tsx` continua protegendo a reserva de voz compartilhada.
+
+**Pendente pela tela real:** desktop estreito, telefone com teclado aberto, banners de conexão e
+painel de voz, foco após aprovação, e jornada com Supabase fresco/modelo. jsdom não mede pixels.
+As specs opt-in `agent-crm-workbench-real-model.spec.ts` e
+`agent-crm-workbench-real-tenant.spec.ts` foram adaptadas, mas não executadas nesta mudança.
+Não registrar esta cobertura parcial como PASS de E2E.
