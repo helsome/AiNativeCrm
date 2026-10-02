@@ -5,6 +5,7 @@ import {
   fauxProvider,
   fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
+import { getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai";
 
 import { PiAgentRuntime } from "./runtime";
 
@@ -174,6 +175,100 @@ describe("PiAgentRuntime", () => {
       model,
     });
     expect(second.finalText).toBe("continued result");
+  });
+
+  it("refreshes the explicit system baseline after JSON restore while preserving history and current tools", async () => {
+    const observedPrompts: string[] = [];
+    const observedTools: string[][] = [];
+    const { runtime } = runtimeWithFaux([
+      fauxAssistantMessage([
+        { type: "thinking", thinking: "private planning", thinkingSignature: "signed-history" },
+        fauxToolCall("lookup_old", { id: "lead-1" }),
+      ], { stopReason: "toolUse", responseId: "old-response" }),
+      fauxAssistantMessage("Prior verified finding."),
+      (context) => {
+        observedPrompts.push(getCurrentSystemPrompt(context.messages));
+        observedTools.push(getCurrentTools(context.messages).map((tool) => tool.name));
+        expect(getCurrentTools(context.messages)).toEqual([
+          expect.objectContaining({ name: "lookup_current", description: "Current allowed lookup",
+            parameters: { type: "object", properties: { confirmed: { type: "boolean" } }, required: ["confirmed"] } }),
+        ]);
+        const priorAssistant = context.messages.find((message) =>
+          message.role === "assistant" && message.responseId === "old-response");
+        expect(priorAssistant?.content).toEqual(expect.arrayContaining([
+          expect.objectContaining({ type: "thinking", thinkingSignature: "signed-history" }),
+        ]));
+        expect(context.messages).toEqual(expect.arrayContaining([
+          expect.objectContaining({ role: "user", content: [{ type: "text", text: "Original task" }] }),
+          expect.objectContaining({ role: "toolResult", toolName: "lookup_old",
+            content: [{ type: "text", text: "Persisted CRM fact" }] }),
+        ]));
+        return fauxAssistantMessage(fauxToolCall("lookup_current", { confirmed: true }), { stopReason: "toolUse" });
+      },
+      (context) => {
+        observedPrompts.push(getCurrentSystemPrompt(context.messages));
+        return fauxAssistantMessage("Current policy applied.");
+      },
+      (context) => {
+        observedPrompts.push(getCurrentSystemPrompt(context.messages));
+        return fauxAssistantMessage("Newest policy applied.");
+      },
+    ]);
+    const first = await runtime.run({
+      systemPrompt: "OLD_MEMORY_v1", prompt: "Original task", model, maxTurns: 2,
+      tools: [{ name: "lookup_old", description: "Old allowed lookup", capability: "read",
+        inputSchema: { type: "object", properties: { id: { type: "string" } } },
+        execute: async () => ({ content: "Persisted CRM fact" }) }],
+    });
+    const restored = JSON.parse(JSON.stringify(first.messages));
+    const before = JSON.stringify(restored);
+    const execute = vi.fn(async () => ({ content: "Current CRM fact" }));
+    const resumed = await runtime.run({
+      systemPrompt: "CURRENT_MEMORY_v2", messages: restored, prompt: "Continue", model, maxTurns: 2,
+      tools: [{ name: "lookup_current", description: "Current allowed lookup", capability: "read",
+        inputSchema: { type: "object", properties: { confirmed: { type: "boolean" } }, required: ["confirmed"] }, execute }],
+    });
+    expect(observedPrompts).toEqual(["CURRENT_MEMORY_v2", "CURRENT_MEMORY_v2"]);
+    expect(observedTools).toEqual([["lookup_current"]]);
+    expect(execute).toHaveBeenCalledOnce();
+    expect(resumed.finalText).toBe("Current policy applied.");
+    expect(resumed.messages[0]).toEqual({ role: "system", content: "CURRENT_MEMORY_v2" });
+    expect(JSON.stringify(restored)).toBe(before);
+    const resumedAgain = await runtime.run({ systemPrompt: "CURRENT_MEMORY_v3",
+      messages: JSON.parse(JSON.stringify(resumed.messages)), prompt: "Continue again", model,
+    });
+    expect(observedPrompts).toEqual(["CURRENT_MEMORY_v2", "CURRENT_MEMORY_v2", "CURRENT_MEMORY_v3"]);
+    expect(resumedAgain.messages.filter((message) => message.role === "system" && message.content))
+      .toEqual([{ role: "system", content: "CURRENT_MEMORY_v3" }]);
+  });
+
+  it("replaces an old baseline with an empty explicit prompt and preserves supplemental system instructions", async () => {
+    let observed = "not called";
+    const { runtime } = runtimeWithFaux([(context) => {
+      observed = getCurrentSystemPrompt(context.messages);
+      return fauxAssistantMessage("done");
+    }]);
+    await runtime.run({ systemPrompt: "", prompt: "continue", model,
+      messages: [
+        { role: "system", content: "OLD_MEMORY_v1" },
+        { role: "user", content: "Original task" },
+        { role: "system", content: "Keep this supplemental instruction" },
+      ],
+    });
+    expect(observed).toBe("Keep this supplemental instruction");
+  });
+
+  it("keeps the current baseline on cold starts and histories without a leading system message", async () => {
+    const observed: string[] = [];
+    const { runtime } = runtimeWithFaux([
+      (context) => { observed.push(getCurrentSystemPrompt(context.messages)); return fauxAssistantMessage("cold"); },
+      (context) => { observed.push(getCurrentSystemPrompt(context.messages)); return fauxAssistantMessage("legacy"); },
+    ]);
+    await runtime.run({ systemPrompt: "CURRENT_MEMORY_v2", prompt: "start", model });
+    await runtime.run({ systemPrompt: "CURRENT_MEMORY_v2", prompt: "continue", model,
+      messages: [{ role: "user", content: "Legacy history" }],
+    });
+    expect(observed).toEqual(["CURRENT_MEMORY_v2", "CURRENT_MEMORY_v2"]);
   });
 
   it("executes a tool and continues with its result", async () => {

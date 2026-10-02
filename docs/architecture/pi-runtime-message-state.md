@@ -15,4 +15,8 @@
 
 Workbench 自动写入后的继续执行，必须先采用本轮 `runtimeMessages`，再追加 CRM Harness 的执行观察，最后持久化。旧输入消息只代表进入本轮之前的上下文。回归测试覆盖两次连续写入和一次 JSON 持久化恢复；Pi 假 Provider 测试覆盖可见文本与私有思考分离及签名恢复。
 
+恢复时，CRM 本次传入的 `systemPrompt` 是当前系统基线。Pi 0.86.1 若收到以 system 开头的历史，会优先采用历史基线而忽略单独的 `systemPrompt`；因此适配层先复制历史，并只替换首条 system 的文本。后续补充 system 指令、用户/工具历史和 Assistant 私有 continuation 都保留，当前工具集合及 schema 继续由 Pi 声明。没有首条 system 的旧记录和首次运行仍由 Pi 建立基线；显式空 prompt 也会清除旧基线，重复恢复不会累积旧政策。
+
+Workbench 在恢复前重新读取当前发布的组织记忆，而非冻结首次运行时的政策。`run-resumed-workbench-turn.test.ts` 的真实 Pi + 官方 faux provider 回归核对：模型实际收到的记忆 revision 与 `context_loaded` 事件一致，随后保存的 messages 使用同一基线。数据库 transport 和模型 gateway 为受控替身；此测试没有连接真实 Supabase 或外部模型，不代表真实 Key 端到端验收。
+
 后续若要把结果改成结构化提交，提交格式应至少包含结论、证据定位、已执行动作、待确认动作、缺失信息和下一次唤醒条件。当前 `extractProductFinalAnswer` 仍是对无结构文本的兼容与防泄漏兜底，不能替代业务完成判定。

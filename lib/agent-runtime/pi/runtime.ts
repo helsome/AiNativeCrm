@@ -319,14 +319,20 @@ export class PiAgentRuntime implements AgentRuntime {
       };
     });
 
+    const history = input.messages?.map((message) => messageToPi(message, input.model));
+    if (history?.[0]?.role === "system") {
+      // Pi gives a replayed leading system message precedence over systemPrompt.
+      // The CRM has already re-resolved current policy for this call: replace
+      // only that baseline, retaining supplemental system updates, tool results,
+      // and private provider continuation without mutating the caller's state.
+      history[0] = { ...history[0], content: input.systemPrompt };
+    }
     const agent = new Agent({
       initialState: {
         systemPrompt: input.systemPrompt,
         model: resolved.model,
         ...(tools.length > 0 ? { tools } : {}),
-        ...(input.messages !== undefined
-          ? { messages: input.messages.map((message) => messageToPi(message, input.model)) }
-          : {}),
+        ...(history !== undefined ? { messages: history } : {}),
       },
       streamFn: resolved.streamFn,
       toolExecution: input.toolExecution ?? "parallel",
