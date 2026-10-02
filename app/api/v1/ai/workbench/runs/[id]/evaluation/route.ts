@@ -1,5 +1,9 @@
+import { z } from "zod";
+import { projectLangfuseEvaluation } from "@/lib/ai/integrations/langfuse";
+import { integrationBinding } from "@/lib/ai/integrations/config";
 import { createHash, randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
+import { audit } from "@/lib/audit";
 
 import { ok, fail } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
@@ -277,8 +281,10 @@ export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
 }
 
 /** Explicit, cost-bearing semantic review using the run's published model binding. */
-export async function POST(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
+export async function POST(req: NextRequest, ctx: RouteCtx): Promise<Response> {
   const requestId = randomUUID();
+  const mode = z.enum(["semantic", "deterministic_export"]).safeParse(new URL(req.url).searchParams.get("mode") ?? "semantic");
+  if (!mode.success) return fail("invalid_request", "Unknown evaluation operation.", 400, { requestId });
   const { id } = await ctx.params;
   if (!UUID_RX.test(id)) return fail("invalid_request", "run id 无效。", 400, { requestId });
   const authz = await requireRole("manager", { requestId, resource: "ai_workbench" });
@@ -291,6 +297,19 @@ export async function POST(_req: NextRequest, ctx: RouteCtx): Promise<Response> 
     material = await loadEvaluationMaterial(admin, authz.org.orgId, id);
   } catch (error) {
     return materialFailure(error, requestId);
+  }
+  // Explicit projection of deterministic evaluation preserves the read-only GET contract.
+  if (mode.data === "deterministic_export") {
+    const report = await runAgentEvaluation({ run: material.input, profile: material.profile });
+    const fingerprint = evaluationFingerprint(material.baseFingerprint, "deterministic");
+    if (!(await persistReport(admin, authz.org.orgId, report, fingerprint)))
+      return fail("evaluation_persist_failed", "无法保存确定性评测。", 500, { requestId });
+    try {
+      await projectLangfuseEvaluation(getRequestPool(), authz.org.orgId, report, fingerprint);
+    } catch { return fail("internal_error", "评测已保存，但投递排队失败。可安全重试。", 503, { requestId }); }
+    await audit({ action: "ai.integration_export_requested", actorUserId: authz.user.id, organizationId: authz.org.orgId,
+      resourceType: "ai_workbench_runs", resourceId: id, requestId });
+    return ok({ ...report, inputFingerprint: fingerprint, projection: "queued_if_enabled" }, { requestId });
   }
   if (!material.versionId)
     return fail(
@@ -325,8 +344,11 @@ export async function POST(_req: NextRequest, ctx: RouteCtx): Promise<Response> 
     .maybeSingle();
   if (cached?.report) {
     const cachedReport = cached.report as unknown as AgentEvalReport;
-    if (cachedReport.semanticJudge?.status === "completed")
+    if (cachedReport.semanticJudge?.status === "completed") {
+      if (integrationBinding(authz.org.orgId, "langfuse"))
+        await projectLangfuseEvaluation(pool, authz.org.orgId, cachedReport, inputFingerprint).catch(() => {});
       return ok({ ...cachedReport, inputFingerprint, cached: true }, { requestId });
+    }
   }
   const deps = requestTurnDeps();
   const judge = new LlmAgentSemanticJudge({
@@ -356,5 +378,8 @@ export async function POST(_req: NextRequest, ctx: RouteCtx): Promise<Response> 
     return fail("evaluation_persist_failed", "语义评测已计算，但无法持久化结果。", 500, {
       requestId,
     });
+  if (integrationBinding(authz.org.orgId, "langfuse")) {
+    await projectLangfuseEvaluation(pool, authz.org.orgId, report, persistedFingerprint).catch(() => {});
+  }
   return ok({ ...report, inputFingerprint: persistedFingerprint, cached: false }, { requestId });
 }

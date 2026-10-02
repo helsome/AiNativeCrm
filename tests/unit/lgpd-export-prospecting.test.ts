@@ -34,6 +34,7 @@ class ReadQuery {
     this.filters.push([key, value]);
     return this;
   }
+  is(key: string, value: unknown) { return this.eq(key, value); }
   order() {
     return this;
   }

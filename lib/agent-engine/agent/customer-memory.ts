@@ -1,3 +1,6 @@
+import { integrationBinding } from "@/lib/ai/integrations/config";
+import { readConfirmedCustomerMemory } from "@/lib/ai/integrations/mem0";
+import { getRequestPool } from "@/lib/agent-engine/db/request-pool";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { readServiceBoundarySupabase } from "@/lib/atendimento/origem";
@@ -107,6 +110,10 @@ export async function loadCustomerMemoryForConversation(
       : query.eq("demanda_revision", boundary.demanda_revision);
   const { data, error } = await query.order("seq", { ascending: false }).limit(1).maybeSingle();
   if (error) throw new Error("customer_memory_read_failed", { cause: error });
+  const externalMemory = integrationBinding(organizationId, "mem0")
+    ? await readConfirmedCustomerMemory(getRequestPool(), organizationId, boundary.contact_id)
+        .catch(() => ({ status: "unavailable", memories: [] }))
+    : undefined;
   const current = await readServiceBoundarySupabase(db, organizationId, conversationId);
   if (!current || !sameBoundary(boundary, current))
     return {
@@ -133,7 +140,8 @@ export async function loadCustomerMemoryForConversation(
     return {
       schema_version: 1 as const,
       access: "read_only" as const,
-      status: "empty" as const,
+      status: externalMemory?.memories.length ? "available" as const : "empty" as const,
+      ...(externalMemory ? { confirmed_customer_memory: externalMemory } : {}),
       scope,
       checkpoint: null,
       revision: null,
@@ -146,6 +154,7 @@ export async function loadCustomerMemoryForConversation(
     schema_version: 1 as const,
     access: "read_only" as const,
     status: "available" as const,
+    ...(externalMemory ? { confirmed_customer_memory: externalMemory } : {}),
     scope,
     revision: String(checkpoint.seq),
     checkpoint: {

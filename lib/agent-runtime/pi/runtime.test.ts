@@ -1,3 +1,4 @@
+import type { RuntimeObservation } from "../types";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -96,6 +97,69 @@ describe("PiAgentRuntime", () => {
     },
     90_000,
   );
+
+  it("observes real model/tool boundaries without exporting private contents", async () => {
+    const { runtime } = runtimeWithFaux([
+      fauxAssistantMessage(fauxToolCall("lookup", { secret: "ARG_CANARY" }), {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage("OUTPUT_CANARY"),
+    ]);
+    const observations: RuntimeObservation[] = [];
+    await runtime.run({
+      systemPrompt: "SYSTEM_CANARY",
+      prompt: "USER_CANARY",
+      model,
+      maxTurns: 3,
+      tools: [
+        {
+          name: "lookup",
+          description: "Lookup",
+          inputSchema: { type: "object", properties: { secret: { type: "string" } } },
+          capability: "read",
+          execute: async () => ({ content: "TOOL_CANARY" }),
+        },
+      ],
+      onObservation: (observation) => {
+        observations.push(observation);
+      },
+    });
+    expect(observations.map((observation) => observation.kind).sort()).toEqual([
+      "generation",
+      "generation",
+      "tool",
+    ]);
+    expect(observations.every((observation) => observation.endedAt >= observation.startedAt)).toBe(
+      true,
+    );
+    expect(JSON.stringify(observations)).not.toContain("CANARY");
+    expect(
+      observations
+        .filter((observation) => observation.kind === "generation")
+        .every((observation) => observation.usage !== undefined),
+    ).toBe(true);
+  });
+
+  it("isolates rejected, throwing and never-settling optional observers", async () => {
+    for (const observer of [
+      () => {
+        throw new Error("sink unavailable");
+      },
+      async () => {
+        throw new Error("enqueue failed");
+      },
+      () => new Promise<void>(() => {}),
+    ]) {
+      const { runtime } = runtimeWithFaux([fauxAssistantMessage("finished")]);
+      const result = await runtime.run({
+        systemPrompt: "system",
+        prompt: "hello",
+        model,
+        onObservation: observer,
+      });
+      expect(result.finalText).toBe("finished");
+    }
+  }, 5000);
 
   it("runs a basic turn through Pi Agent Core and exposes lifecycle events", async () => {
     const { runtime } = runtimeWithFaux([fauxAssistantMessage("ok")]);

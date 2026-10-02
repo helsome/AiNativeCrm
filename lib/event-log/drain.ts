@@ -118,7 +118,7 @@ async function avisarEventoMorto(
 
 export async function drainEventLog(
   admin: SupabaseClient,
-  opts: { limit?: number } = {},
+  opts: { limit?: number; lane?: "business" | "integration" } = {},
 ): Promise<DrainSummary> {
   const limit = opts.limit ?? 50;
   const summary: DrainSummary = {
@@ -130,7 +130,7 @@ export async function drainEventLog(
     pulados: [],
   };
 
-  const handledTypes = [...new Set(getRegisteredHandlers().flatMap((h) => h.events))];
+  const handledTypes = [...new Set(getRegisteredHandlers().filter((h) => (h.lane ?? "business") === (opts.lane ?? "business")).flatMap((h) => h.events))];
   if (!handledTypes.length) return summary;
 
   const nowIso = new Date().toISOString();
@@ -161,6 +161,7 @@ export async function drainEventLog(
     .from("event_log")
     .select("id, organization_id, event_type, attempts")
     .eq("status", "processing")
+    .in("event_type", handledTypes)
     .lt("updated_at", limiteDePresos);
 
   // ─── E A VOLTA CONTA COMO TENTATIVA ────────────────────────────────────────

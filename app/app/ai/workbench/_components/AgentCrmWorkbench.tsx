@@ -218,6 +218,7 @@ export function AgentCrmWorkbench({
   const [cancelling, setCancelling] = useState(false);
   const readingHistory = useRef(0);
   const [error, setError] = useState("");
+  const [evalExportNotice, setEvalExportNotice] = useState<{ runId: string; text: string } | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [runs, setRuns] = useState<Run[]>([]);
   const [objectKind, setObjectKind] = useState<ObjectKind>(initialLead ? "lead" : "contact");
@@ -484,16 +485,17 @@ export function AgentCrmWorkbench({
     }
   };
 
-  const runSemanticJudge = async () => {
+  const runSemanticJudge = async (mode = "semantic") => {
     if (!detail) return;
     setBusy(true);
     setError("");
     try {
-      const response = await fetch(`/api/v1/ai/workbench/runs/${detail.id}/evaluation`, {
+      const response = await fetch(`/api/v1/ai/workbench/runs/${detail.id}/evaluation${mode === "semantic" ? "" : "?mode=deterministic_export"}`, {
         method: "POST",
       });
       const body = await response.json();
-      if (!response.ok) throw new Error(body.error?.message ?? "语义 Judge 运行失败");
+      if (!response.ok) throw new Error(body.error?.message ?? "评测操作失败");
+      if (mode === "deterministic_export") setEvalExportNotice({ runId: detail.id, text: "确定性评测已保存；Langfuse 启用时会排队投递，不消耗额外模型额度。" });
       setDetail((current) =>
         current?.id === detail.id ? { ...current, evaluation: body.data } : current,
       );
@@ -1331,6 +1333,12 @@ export function AgentCrmWorkbench({
                             ? ` · ${detail.evaluation.summary.structuredClaims} 条 Claims`
                             : ""}
                         </p>
+                        <button type="button" disabled={busy || !["completed", "partial", "failed", "cancelled"].includes(detail.status)}
+                          onClick={() => void runSemanticJudge("deterministic_export")}
+                          className="mt-2 rounded-md border px-2 py-1 font-medium disabled:opacity-50">
+                          保存并投递确定性 Eval
+                        </button>
+                        {evalExportNotice?.runId === detail.id && <p className="mt-1 text-muted-foreground">{evalExportNotice.text}</p>}
                         {detail.evaluation.semanticJudge.status === "completed" ? (
                           <div className="mt-2 rounded-md bg-muted p-2 text-muted-foreground">
                             语义 Judge：{detail.evaluation.semanticJudge.verdict}

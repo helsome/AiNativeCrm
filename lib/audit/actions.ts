@@ -217,6 +217,13 @@ export const AUDIT_ACTIONS = [
   "ai.flywheel_proposal_applied",
   "ai.org_memory_published",
   "ai.org_memory_entry_created",
+  "ai.integration_configured",
+  "ai.integration_drain",
+  "ai.customer_memory_confirmed",
+  "ai.customer_memory_deleted",
+  "ai.customer_memory_reconciled",
+  "ai.wiki_source_connected",
+  "ai.integration_export_requested",
   "ai.org_memory_entry_updated",
   /** Provedor/modelo de um ponto do sistema que usa IA foi trocado no painel. */
   "ai.purpose_binding_updated",

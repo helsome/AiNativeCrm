@@ -1,3 +1,4 @@
+import { AgentIntegrationsPanel } from "@/components/ai/AgentIntegrationsPanel";
 import { redirect } from "next/navigation";
 
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
@@ -26,5 +27,12 @@ export default async function ProvedoresPage() {
   if (!activeOrg) redirect("/app");
   if (ROLE_RANK[activeOrg.role] < ROLE_RANK.manager) redirect("/403");
 
-  return <PainelDeProvedores />;
+  return (
+    <>
+      <PainelDeProvedores />
+      <div className="p-6">
+        <AgentIntegrationsPanel />
+      </div>
+    </>
+  );
 }

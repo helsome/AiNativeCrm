@@ -1,3 +1,5 @@
+import { mem0SyncHandler } from "@/lib/ai/integrations/mem0";
+import { langfuseExportHandler } from "@/lib/ai/integrations/langfuse";
 import { followupGatilhoPresencaHandler } from "@/lib/followup/gatilho-presenca.handler";
 /**
  * Centralised handler registration for the event_log dispatcher.
@@ -53,5 +55,7 @@ export function ensureHandlersRegistered(): void {
   // fechamento — depende de rede de terceiro e não pode atrasar quem escreve
   // no banco. Falha dele nunca segura os handlers acima.
   registerHandler(conversaoDeVendaHandler);
+  registerHandler(langfuseExportHandler);
+  registerHandler(mem0SyncHandler);
   _registered = true;
 }

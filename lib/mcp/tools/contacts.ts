@@ -1,3 +1,6 @@
+import { integrationBinding } from "@/lib/ai/integrations/config";
+import { readConfirmedCustomerMemory } from "@/lib/ai/integrations/mem0";
+import { getRequestPool } from "@/lib/agent-engine/db/request-pool";
 /**
  * MCP read tools sobre /api/v1/contacts (Spec 11 §3.1).
  *
@@ -86,7 +89,12 @@ export const crmGetContact: McpToolDefinition<typeof getInputShape> = {
       },
       { contactId: input.contact_id, decryptPurpose: null },
     );
+    const customerMemory = integrationBinding(ctx.organizationId, "mem0")
+      ? await readConfirmedCustomerMemory(getRequestPool(), ctx.organizationId, contact.id)
+        .catch(() => ({ status: "unavailable", memories: [] }))
+      : undefined;
     return {
+      ...(customerMemory ? { confirmed_customer_memory: customerMemory } : {}),
       id: contact.id,
       name: contact.name,
       display_name: contact.display_name,

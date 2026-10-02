@@ -52,6 +52,20 @@ describe("real observed knowledge envelope", () => {
       observedKnowledgeEvidence([{ role: "assistant", content: JSON.stringify(value) }]),
     ).toEqual([]);
   });
+  it("builds a safe WeKnora receipt link without trusting arbitrary locators", () => {
+    const evidence = normalizeKnowledgeEvidence(value)[0]!;
+    const wiki = {
+      ...evidence,
+      locator: {
+        ...evidence.locator,
+        provider: "weknora",
+        revision: "a".repeat(64),
+        uri: "https://evil.invalid",
+      },
+    };
+    expect(knowledgeEvidenceUri(wiki)).toBe(`/api/v1/ai/integrations/wiki/evidence/${chunk}`);
+    expect(knowledgeEvidenceUri({ ...wiki, id: "../../secret" })).toBeNull();
+  });
   it("rebuilds a precise local URI rather than trusting an injected location", () => {
     const evidence = normalizeKnowledgeEvidence(value)[0]!;
     expect(knowledgeEvidenceUri(evidence)).toBe(

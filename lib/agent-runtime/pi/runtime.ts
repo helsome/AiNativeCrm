@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { AgentEvent, AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import type * as PiAgentCoreModuleType from "@earendil-works/pi-agent-core";
 import {
@@ -20,6 +21,7 @@ import type {
   RuntimeToolResult,
   RuntimeToolCall,
   RuntimeUsage,
+  RuntimeObservation,
 } from "../types";
 import { resolvePiModel } from "./model-adapter";
 import type { ResolvedPiModel } from "./model-adapter";
@@ -285,6 +287,67 @@ export class PiAgentRuntime implements AgentRuntime {
       loadPiAi(),
       this.resolveModel(input.model),
     ]);
+    const pendingObservations: Promise<void>[] = [];
+    const observe = (observation: RuntimeObservation) => {
+      if (!input.onObservation) return;
+      // Observability is a separate side effect: it must never repeat or fail a CRM action.
+      pendingObservations.push(
+        Promise.resolve()
+          .then(() => input.onObservation!(observation))
+          .then(
+            () => {},
+            () => {},
+          ),
+      );
+    };
+    const observedStream: ResolvedPiModel["streamFn"] = async (model, context, options) => {
+      const startedAt = now();
+      const id = randomUUID();
+      try {
+        const stream = await resolved.streamFn(model, context, options);
+        // result() does not consume the stream. Pi remains its single token consumer.
+        void stream.result().then(
+          (message) =>
+            observe({
+              id,
+              kind: "generation",
+              name: "model",
+              startedAt,
+              endedAt: now(),
+              status:
+                message.stopReason === "aborted"
+                  ? "cancelled"
+                  : message.stopReason === "error"
+                    ? "error"
+                    : "ok",
+              model: input.model.model,
+              provider: input.model.provider,
+              messageCount: context.messages.length,
+              usage: usageOf(message.usage),
+            }),
+          () =>
+            observe({
+              id,
+              kind: "generation",
+              name: "model",
+              startedAt,
+              endedAt: now(),
+              status: "error",
+            }),
+        );
+        return stream;
+      } catch (error) {
+        observe({
+          id,
+          kind: "generation",
+          name: "model",
+          startedAt,
+          endedAt: now(),
+          status: input.abortSignal?.aborted ? "cancelled" : "error",
+        });
+        throw error;
+      }
+    };
     const events: AgentRuntimeEvent[] = [];
     const calls: RuntimeToolCall[] = [];
     const toolByName = new Map((input.tools ?? []).map((tool) => [tool.name, tool]));
@@ -305,16 +368,30 @@ export class PiAgentRuntime implements AgentRuntime {
         description: tool.description,
         parameters,
         execute: async (toolCallId, args, signal) => {
-          const result = await tool.execute(args as Record<string, unknown>, {
-            toolCallId,
-            signal,
-          });
-          return {
-            content: resultContent(result),
-            details: result.details,
-            ...(result.isError !== undefined ? { isError: result.isError } : {}),
-            ...(result.terminate !== undefined ? { terminate: result.terminate } : {}),
-          };
+          const startedAt = now();
+          let status: "ok" | "error" | "cancelled" = "error";
+          try {
+            const result = await tool.execute(args as Record<string, unknown>, {
+              toolCallId,
+              signal,
+            });
+            status = result.isError ? "error" : "ok";
+            return {
+              content: resultContent(result),
+              details: result.details,
+              ...(result.isError !== undefined ? { isError: result.isError } : {}),
+              ...(result.terminate !== undefined ? { terminate: result.terminate } : {}),
+            };
+          } finally {
+            observe({
+              id: toolCallId,
+              kind: "tool",
+              name: tool.name,
+              startedAt,
+              endedAt: now(),
+              status: signal?.aborted ? "cancelled" : status,
+            });
+          }
         },
       };
     });
@@ -334,7 +411,7 @@ export class PiAgentRuntime implements AgentRuntime {
         ...(tools.length > 0 ? { tools } : {}),
         ...(history !== undefined ? { messages: history } : {}),
       },
-      streamFn: resolved.streamFn,
+      streamFn: input.onObservation ? observedStream : resolved.streamFn,
       toolExecution: input.toolExecution ?? "parallel",
       transformContext: async (messages, signal) => {
         if (input.transformContext === undefined) return messages;
@@ -499,6 +576,17 @@ export class PiAgentRuntime implements AgentRuntime {
       await agent.prompt(input.prompt);
     } finally {
       input.abortSignal?.removeEventListener("abort", abort);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          Promise.allSettled(pendingObservations),
+          new Promise<void>((resolve) => {
+            timer = setTimeout(resolve, 1500);
+          }),
+        ]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
     }
 
     const messages = agent.state.messages.flatMap((message) => {

@@ -57,6 +57,11 @@ export function normalizeKnowledgeEvidence(value: unknown): KnowledgeEvidence[] 
 export function knowledgeEvidenceUri(evidence: KnowledgeEvidence): string | null {
   if (evidence.namespace === "organization_memory") return "/app/ai/memory";
   const { sourceId, revision } = evidence.locator;
+  if (evidence.locator.provider === "weknora") {
+    return uuid.test(sourceId) && uuid.test(evidence.id) && /^[a-f0-9]{64}$/.test(revision ?? "")
+      ? `/api/v1/ai/integrations/wiki/evidence/${evidence.id}`
+      : null;
+  }
   if (!uuid.test(sourceId) || !uuid.test(evidence.id) || !revision || !uuid.test(revision))
     return null;
   return `/api/v1/ai/knowledge/sources/${sourceId}/trechos?version_id=${revision}&chunk_id=${evidence.id}`;

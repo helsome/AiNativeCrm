@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomerMemoryPanel } from "@/components/ai/CustomerMemoryPanel";
+
 import { useLocaleDeData } from "@/hooks/i18n/useLocaleDeData";
 
 import { useT } from "@/hooks/i18n/useT";
@@ -167,6 +169,10 @@ export function ContactDetailClient({ contactId }: Props) {
       </header>
 
       <ConversaNoDossie conversa={contact.conversa} />
+      {activeOrg && ROLE_RANK[activeOrg.role] >= ROLE_RANK.manager && (
+        <CustomerMemoryPanel key={contactId} contactId={contactId}
+          readOnly={contact.is_anonymized || user.support?.access_mode === "support_readonly"} />
+      )}
 
       {/* ANTES das abas, e não dentro de uma delas: é o único conteúdo desta
           tela que PEDE uma ação. Enterrado numa aba, viraria pendência que só

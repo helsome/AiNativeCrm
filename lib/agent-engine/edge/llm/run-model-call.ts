@@ -1,3 +1,4 @@
+import { beginLangfuseCall } from "@/lib/ai/integrations/langfuse";
 import { guardServiceTools } from "@/lib/atendimento/fronteira-server";
 import { createAgentRuntime } from "@/lib/agent-runtime";
 import { runPiAiSdkCall } from "@/lib/agent-runtime/pi/ai-sdk-compat";
@@ -713,6 +714,7 @@ export async function runModelCall(
     totalTokens: 0,
   };
   let turnsObserved = 0;
+  const trace = await beginLangfuseCall(db, input.tenantId, input.workbenchRunId).catch(() => null);
   try {
     input.abortSignal?.throwIfAborted();
     const toolsForCall = guardServiceTools(prefix.tools);
@@ -766,10 +768,12 @@ export async function runModelCall(
           })) ?? false
         );
       },
+      ...(trace ? { onObservation: trace.onObservation } : {}),
       ...(input.onEvent ? { onEvent: input.onEvent } : {}),
       runtime: deps.runtime ?? createAgentRuntime(),
     });
   } catch (err) {
+    await trace?.finish(input.abortSignal?.aborted ? "cancelled" : "error").catch(() => { deps.log?.warn("optional_trace_enqueue_failed", { code: "langfuse_outbox_failed" }); });
     // ─── A LINHA QUE FALTAVA ────────────────────────────────────────────────
     //
     // Até aqui o INSERT em llm_calls vivia só DEPOIS desta chamada, sem `try`
@@ -804,6 +808,7 @@ export async function runModelCall(
     });
     throw err;
   }
+  await trace?.finish(input.abortSignal?.aborted ? "cancelled" : "ok").catch(() => { deps.log?.warn("optional_trace_enqueue_failed", { code: "langfuse_outbox_failed" }); });
   const latencyMs = Date.now() - startedAt;
 
   const usageFromResult = {

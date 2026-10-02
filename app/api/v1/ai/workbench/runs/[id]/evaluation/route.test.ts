@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
-const mocks = vi.hoisted(() => ({ from: vi.fn(), evaluate: vi.fn() }));
+const mocks = vi.hoisted(() => ({ from: vi.fn(), evaluate: vi.fn(), project: vi.fn() }));
+vi.mock("@/lib/ai/integrations/langfuse", () => ({ projectLangfuseEvaluation: mocks.project }));
+vi.mock("@/lib/audit", () => ({ audit: vi.fn() }));
 vi.mock("@/lib/auth/require-role", () => ({
   requireRole: vi.fn().mockResolvedValue({ ok: true, org: { orgId: "org" }, user: { id: "user" } }),
 }));
@@ -14,7 +16,7 @@ vi.mock("@/lib/ai/evals/semantic-judge", () => ({
   WORKBENCH_SEMANTIC_RUBRIC_REVISION: 1,
 }));
 vi.mock("@/lib/ai/evals/run-evaluation", () => ({ runAgentEvaluation: mocks.evaluate }));
-import { GET } from "./route";
+import { GET, POST } from "./route";
 const id = "11111111-1111-4111-8111-111111111111";
 function stub(failure?: string, corruptChild = false, missingState = false) {
   mocks.from.mockImplementation((table: string) => {
@@ -39,13 +41,16 @@ function stub(failure?: string, corruptChild = false, missingState = false) {
           : table === "ai_agent_run_states"
             ? multiple
               ? [{ run_id: "child", messages: corruptChild ? {} : [] }]
-              : missingState ? null : { messages: [] }
+              : missingState
+                ? null
+                : { messages: [] }
             : table === "ai_agents"
               ? { origin: "user" }
               : [],
     });
     const builder = {
       select: () => builder,
+      upsert: async () => ({ error: null }),
       eq: (key: string) => {
         if (key === "parent_run_id") child = true;
         return builder;
@@ -63,9 +68,51 @@ function stub(failure?: string, corruptChild = false, missingState = false) {
 }
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.evaluate.mockResolvedValue({ verdict: "pass" });
+  mocks.evaluate.mockResolvedValue({
+    runId: id,
+    profileKey: "crm",
+    profileRevision: 1,
+    verdict: "pass",
+    score: 90,
+    dimensions: [],
+    semanticJudge: { status: "not_run" },
+  });
+  mocks.project.mockResolvedValue(undefined);
 });
 describe("real evaluation material is required", () => {
+  it("keeps GET read-only and explicitly queues deterministic scores without a judge", async () => {
+    stub();
+    expect(
+      (
+        await GET(new NextRequest(`http://localhost/runs/${id}/evaluation`), {
+          params: Promise.resolve({ id }),
+        })
+      ).status,
+    ).toBe(200);
+    expect(mocks.project).not.toHaveBeenCalled();
+    const response = await POST(
+      new NextRequest(`http://localhost/runs/${id}/evaluation?mode=deterministic_export`, {
+        method: "POST",
+      }),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(response.status).toBe(200);
+    expect(mocks.project).toHaveBeenCalledWith(
+      undefined,
+      "org",
+      expect.objectContaining({ verdict: "pass" }),
+      expect.stringMatching(/^[a-f0-9]{64}$/),
+    );
+    expect(mocks.evaluate.mock.calls.at(-1)![0]).not.toHaveProperty("judge");
+  });
+  it("rejects unknown export modes before a paid judge can run", async () => {
+    const response = await POST(
+      new NextRequest(`http://localhost/runs/${id}/evaluation?mode=typo`, { method: "POST" }),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(response.status).toBe(400);
+    expect(mocks.evaluate).not.toHaveBeenCalled();
+  });
   it.each(["ai_agent_run_events", "ai_agent_action_proposals", "ai_agent_run_states", "ai_agents"])(
     "rejects incomplete %s instead of grading empty material",
     async (failure) => {
@@ -87,7 +134,9 @@ describe("real evaluation material is required", () => {
   });
   it("does not grade a completed run whose persisted observations are missing", async () => {
     stub(undefined, false, true);
-    const response = await GET(new NextRequest(`http://localhost/runs/${id}/evaluation`), { params: Promise.resolve({ id }) });
+    const response = await GET(new NextRequest(`http://localhost/runs/${id}/evaluation`), {
+      params: Promise.resolve({ id }),
+    });
     expect(response.status).toBe(409);
     expect(mocks.evaluate).not.toHaveBeenCalled();
   });

@@ -1,3 +1,6 @@
+import { searchCompanyWiki } from "@/lib/ai/integrations/weknora";
+import { integrationBinding } from "@/lib/ai/integrations/config";
+import { getRequestPool } from "@/lib/agent-engine/db/request-pool";
 /**
  * Capacidades do pacote "Aprender e evoluir" — o acervo da empresa e a memoria
  * da organizacao.
@@ -83,17 +86,22 @@ export const crmSearchKnowledge: McpToolDefinition<typeof buscarInputShape> = {
       };
     }
 
-    const resultado = await buscarConhecimento(ctx.supabase, {
+    const wiki = integrationBinding(ctx.organizationId, "weknora")
+      ? await searchCompanyWiki(getRequestPool(), ctx.organizationId, fontes, input.pergunta, input.quantidade)
+        .catch(() => ({ evidence: [], status: "unavailable", handledSourceIds: [] as string[] }))
+      : { evidence: [], status: "disabled", handledSourceIds: [] as string[] };
+    const localSources = fontes.filter((sourceId) => !wiki.handledSourceIds.includes(sourceId));
+    const resultado = localSources.length ? await buscarConhecimento(ctx.supabase, {
       organizationId: ctx.organizationId,
-      knowledgeSourceIds: fontes,
+      knowledgeSourceIds: localSources,
       pergunta: input.pergunta,
       topK: input.quantidade,
       limiar: LIMIAR_PADRAO,
-    });
+    }) : { trechos: [], melhorSimilaridade: null };
 
     return {
       trechos: resultado.trechos,
-      evidence: resultado.trechos.map((trecho) => ({
+      evidence: [...wiki.evidence, ...resultado.trechos.map((trecho) => ({
         id: trecho.chunk_id,
         namespace: "organization_wiki",
         kind: trecho.metadata?.source_type === "wiki" ? "wiki_page" : "document",
@@ -114,9 +122,10 @@ export const crmSearchKnowledge: McpToolDefinition<typeof buscarInputShape> = {
           ...(trecho.position !== undefined ? { position: trecho.position } : {}),
           ...(trecho.content_hash ? { content_hash: trecho.content_hash } : {}),
         },
-      })),
+      }))],
       retrieval: {
-        status: resultado.trechos.length > 0 ? "complete" : "empty",
+        wiki_status: wiki.status,
+        status: resultado.trechos.length > 0 || wiki.evidence.length > 0 ? "complete" : "empty",
         namespace: "organization_wiki",
         missing: [],
       },

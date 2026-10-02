@@ -1,3 +1,5 @@
+import { readCompanyWikiEvidence } from "@/lib/ai/integrations/weknora";
+import { getRequestPool } from "@/lib/agent-engine/db/request-pool";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { parseRuntimeMessages } from "./workbench-state";
 import { knowledgeEvidenceUri, observedKnowledgeEvidence } from "@/lib/ai/knowledge/evidence";
@@ -93,7 +95,19 @@ export async function loadWorkbenchObservedEvidence(
   const sourceById = new Map((sources ?? []).map((source) => [source.id, source]));
   const documentIds = new Set((pointers ?? []).map((pointer) => pointer.version_id));
   const entryIds = new Set((entries ?? []).map((entry) => entry.id));
+  const verifiedWiki = new Map<string, Awaited<ReturnType<typeof readCompanyWikiEvidence>>>();
+  const candidates = wiki.filter((item) => item.locator.provider === "weknora" && sourceById.has(item.locator.sourceId)).slice(-10);
+  const wikiDeadline = AbortSignal.timeout(8000);
+  for (let i = 0; i < candidates.length && !wikiDeadline.aborted; i += 2) {
+    await Promise.all(candidates.slice(i, i + 2).map(async (item) => {
+      try { verifiedWiki.set(item.id, await readCompanyWikiEvidence(getRequestPool(), input.organizationId, item.id, wikiDeadline)); }
+      catch { /* Unverifiable/withdrawn synthesis never reappears from saved history. */ }
+    }));
+  }
   return evidence.flatMap((item) => {
+    const externalWiki = item.locator.provider === "weknora";
+    const verified = verifiedWiki.get(item.id);
+    if (externalWiki && (!verified || verified.revision !== item.locator.revision)) return [];
     const source = sourceById.get(item.locator.sourceId);
     const readable =
       item.namespace === "organization_wiki"
@@ -107,17 +121,23 @@ export async function loadWorkbenchObservedEvidence(
         id: item.id,
         namespace: item.namespace,
         title: item.title.slice(0, 240),
-        excerpt: item.excerpt.slice(0, 1800),
+        excerpt: (verified?.content ?? item.excerpt).slice(0, 1800),
         source_id: item.locator.sourceId,
         revision: item.locator.revision ?? null,
-        revision_kind: item.namespace === "organization_wiki" ? "index_version" : "memory_snapshot",
-        index_status: source
-          ? item.locator.revision
-            ? source.active_kb_version_id === item.locator.revision
-              ? "current"
-              : "superseded"
-            : "unknown"
-          : null,
+        revision_kind: externalWiki
+          ? "immutable_observation_manifest"
+          : item.namespace === "organization_wiki"
+            ? "index_version"
+            : "memory_snapshot",
+        index_status: externalWiki
+          ? "current"
+          : source
+            ? item.locator.revision
+              ? source.active_kb_version_id === item.locator.revision
+                ? "current"
+                : "superseded"
+              : "unknown"
+            : null,
         uri: knowledgeEvidenceUri(item),
         ...(typeof item.metadata?.position === "number"
           ? { position: item.metadata.position }
