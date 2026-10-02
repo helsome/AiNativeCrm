@@ -1,7 +1,7 @@
 /* Code-aligned inspection fixtures. This file never calls the CRM API or a model. */
 (function () {
   'use strict';
-  const ref = '36a3af1e7f3488a8df0a494b3c8f4f4661d32a95';
+  const ref = '12749abaa8aa98f7bee988f69fb4aa23e9d5ff29';
   const source = path => 'https://github.com/helsome/AiNativeCrm/blob/' + ref + '/' + path;
   const h = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const link = (path, label) => `<a href="${source(path)}" target="_blank" rel="noopener noreferrer">${h(label)}</a>`;

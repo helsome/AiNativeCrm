@@ -2,6 +2,23 @@
 
 This is a standalone, buildless browser example. Open `dist/index.html` through any ordinary static file server. It does not start the real Next.js CRM, Supabase, an agent worker, a model, or a messaging integration. All customers, prices, dates, approvals and local tasks are fictional.
 
+## Optional Agent services: source-aligned preview
+
+Source baseline: `12749abaa8aa98f7bee988f69fb4aa23e9d5ff29` on `feat/chat-first-workbench-2026-10-01`.
+
+The existing **AI 提供商 → Agent 服务接入** page now shows Mem0, WeKnora and Langfuse as OFF / NOT CONNECTED. All service enable/retry and credential-entry controls are disabled. The **服务接入** button in Agent chat opens four source-linked panels. Customer detail has its own contact-scoped memory panel.
+
+- Configuration shows the real server-only binding fields, configuration versus connectivity boundary, required migrations, admin activation, isolated delivery lane and cleanup limitations
+- Customer-memory scenarios require explicit confirmation, then illustrate pending, synced, unknown-write settlement and local deletion redaction. They are in-memory scenarios, not API responses. A different contact cannot inherit the form or records
+- Wiki scenarios require the fictional allow-list, whole-organization visibility confirmation, source registration and Agent publication before showing evidence. Stale or revoked sources hide excerpts and manifests
+- Trace is an implementation mapping, with no made-up timings, tokens or real trace IDs. A separate terminal-Run scenario illustrates the explicit deterministic Eval save entry without pretending to persist or export a score
+
+These additions use only fictional data. No new state is persisted; reload or Reset returns all service scenarios to defaults. No key, credential, connector grant, vendor deployment, model call or private-data export occurs. Existing Runtime Lab persistence is unchanged. The real CRM adapters are source code, not running services in this Site.
+
+The actual repository uses Next.js, Supabase/PostgreSQL, a separate worker and scheduler; this Site is configured for static assets. Sites can also publish Cloudflare-compatible Workers, but no supported Worker build or equivalent full CRM backend configuration is present here. Converting the database/auth/worker/vendor stack is outside this preview update. No database migrations or live vendor acceptance were run. The production verification report is `docs/testing/agent-services-2026-10-02.md` at the immutable baseline above.
+
+Mapped sources: `components/ai/AgentIntegrationsPanel.tsx`, `components/ai/CustomerMemoryPanel.tsx`, `app/api/v1/ai/integrations/route.ts`, `app/api/v1/ai/integrations/wiki/sources/route.ts`, `app/app/ai/workbench/_components/AgentCrmWorkbench.tsx`, and `lib/ai/integrations/{config,mem0,weknora,langfuse}.ts`.
+
 ## Modern neutral visual refresh
 
 The shared visual contract now uses a white working surface, `#F7F8FA` canvas, `#F9FAFB` lightweight sidebar, `#1D1D1F` text, `#6E6E73` secondary text, and `#E5E7EB` dividers. System sans-serif typography, 12px controls, 16px cards, and a 20px composer replace the earlier dense warm/graphite treatment. Primary actions are charcoal; blue is reserved for links, focus, and information states. Source-code inspection, local Runtime Lab, safety labels, 62 routes, and all existing interactions remain intact. The production application's tenant branding is independent and is not overwritten by this standalone example.
@@ -10,9 +27,9 @@ The shared visual contract now uses a white working surface, `#F7F8FA` canvas, `
 
 ## Inspect the current production-code changes
 
-Click **更新检查 · 36a3af1** in the toolbar, **证据与版本** in Agent chat, or **检查本次更新** in the welcome area. This opens an inspection drawer alongside the retained chat-first UI. All its data is synthetic and explicitly separate from the current simulated chat Run.
+Click **更新检查 · 12749ab** in the toolbar, **证据与版本** in Agent chat, or **检查本次更新** in the welcome area. This opens an inspection drawer alongside the retained chat-first UI. All its data is synthetic and explicitly separate from the current simulated chat Run.
 
-The inspection drawer is mapped to production feature commit `36a3af1e7f3488a8df0a494b3c8f4f4661d32a95` on `feat/chat-first-workbench-2026-10-01`:
+The inspection drawer is mapped to production feature commit `12749abaa8aa98f7bee988f69fb4aa23e9d5ff29` on `feat/chat-first-workbench-2026-10-01`:
 
 - Knowledge evidence shows current, superseded and revoked-source examples, with exact synthetic source/index/chunk JSON. Revocation hides the excerpt rather than retaining a historical permission grant
 - Organization memory demonstrates a resumed turn reading a newer published revision; the customer checkpoint is read-only and bounded by organization, contact, conversation, service revision and demanda revision. Unavailable/empty/changed or anonymized-contact examples never expose the previous checkpoint
@@ -95,6 +112,7 @@ npm run test:engine
 - `chat-dom.cjs`: real DOM interaction, conversation turns, keyboard/IME, escaping, drawer focus, delegation, cancellation and CSS parsing
 - `runtime-lab.cjs`: executable engine, all workflow gates, reload checkpoints, no duplicate tasks, missing-Wiki recovery, failure control, reset isolation and evidence provenance
 - `inspection-dom.cjs`: code-aligned new panels, source withdrawal/staleness, customer boundary redaction, Eval missing-material refusal, scoped pause/resume and expired approvals, source provenance, focus, 62-route entry preservation and zero HTTP transport
+- `agent-services-dom.cjs`: default-off/not-connected provider states, disabled credential controls, no transport or persistence, contact-scoped confirmation/sync/settlement/delete scenarios, Wiki authorization/publish/revalidation gates, Trace mapping and terminal-only Eval scenario, 62 routes, reset/reload, keyboard and responsive DOM checks
 - `runtime-lab-dom.cjs`: real DOM workflow/reload/reset, trace/evidence/replay controls, provenance display, keyboard tabs/focus, transport-call tripwires and responsive CSS containment
 
 These tests use deterministic Node and jsdom harnesses, not a live browser rendering engine. Responsive/mobile CSS is parsed and structurally asserted, but this does not verify pixel layout, touch scrolling or a real phone keyboard. Browser screenshot QA was not run: the task environment had a previously verified browser-process/preview limitation, and no alternate route was used to bypass it. No live model, live CRM backend, complete root unit suite or production queue recovery test is claimed.

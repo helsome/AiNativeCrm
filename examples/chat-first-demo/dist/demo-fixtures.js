@@ -1,7 +1,7 @@
 /* Fictional fixtures, plus minimized excerpts of committed historical reports. */
 (function (root) {
   'use strict';
-  const ref = '36a3af1e7f3488a8df0a494b3c8f4f4661d32a95';
+  const ref = '12749abaa8aa98f7bee988f69fb4aa23e9d5ff29';
   const historicalRef = 'fc80b14dc88406ab6f5e6ec3ed9ca61d632c0674';
   const source = path => 'https://github.com/helsome/AiNativeCrm/blob/' + ref + '/' + path;
   const fixtures = {
