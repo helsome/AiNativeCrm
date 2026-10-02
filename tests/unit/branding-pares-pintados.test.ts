@@ -41,9 +41,22 @@ const REGUA = extrairRegua(CSS);
 
 /** A mesma fixture adversarial versionada de `branding-contraste.test.ts`. */
 const SEMENTES = [
-  "#0f172a", "#f5c518", "#ffffff", "#000000", "#808080", "#dc2626", "#22c55e",
-  "#f59e0b", "#2563eb", "#14b8a6", "#4b0082", "#e11d48", "#7c3aed", "#1a1f36",
-  "#fafafa", "#506d48",
+  "#0f172a",
+  "#f5c518",
+  "#ffffff",
+  "#000000",
+  "#808080",
+  "#dc2626",
+  "#22c55e",
+  "#f59e0b",
+  "#2563eb",
+  "#14b8a6",
+  "#4b0082",
+  "#e11d48",
+  "#7c3aed",
+  "#1a1f36",
+  "#fafafa",
+  "#506d48",
 ] as const;
 
 /** Quantos pares cada tema tem no globals.css de hoje — o piso da vacuidade. */
@@ -179,9 +192,7 @@ function paresPintados(tema: TemaDaRegua, bloco: Bloco): ParPintado[] {
     // `--color-accent-fg` é medido contra `--color-accent`: o `Fonte` que a
     // régua guarda (grau 6) é só a FORMA como o `globals.css` escreve esse
     // token, e na tela o fundo é o TOKEN, que o bloco emitido reescreve.
-    const tokenDoAlvo = papel.token.endsWith("-fg")
-      ? papel.token.slice(0, -"-fg".length)
-      : null;
+    const tokenDoAlvo = papel.token.endsWith("-fg") ? papel.token.slice(0, -"-fg".length) : null;
     const alvos =
       papel.contra === null
         ? superficies
@@ -219,28 +230,25 @@ const foco = (pares: readonly ParPintado[], superficie: string): number =>
 // ── Os testes ────────────────────────────────────────────────────────────────
 
 describe("o que o produto pinta — todo par, toda semente", () => {
-  it.each(SEMENTES)(
-    "%s: nenhum papel abaixo do piso, nos dois temas, no pixel emitido",
-    (hex) => {
-      const pintados = pintadosDaSemente(hex);
-      for (const { nome } of TEMAS) {
-        const pares = pintados[nome];
-        // Vacuidade POR SEMENTE E POR TEMA: uma instrumentação que devolvesse
-        // lista vazia passaria no filtro abaixo sem ter medido nada.
-        expect(pares.length, `${hex}/${nome}: nenhum par medido`).toBeGreaterThanOrEqual(
-          PARES_DE_HOJE[nome],
-        );
-        const reprovas = pares.filter((p) => !p.passa);
-        expect(
-          reprovas,
-          `${hex}/${nome}: ` +
-            reprovas
-              .map((r) => `${r.papel}×${r.superficie}=${r.razao.toFixed(2)}<${r.piso}`)
-              .join(" | "),
-        ).toEqual([]);
-      }
-    },
-  );
+  it.each(SEMENTES)("%s: nenhum papel abaixo do piso, nos dois temas, no pixel emitido", (hex) => {
+    const pintados = pintadosDaSemente(hex);
+    for (const { nome } of TEMAS) {
+      const pares = pintados[nome];
+      // Vacuidade POR SEMENTE E POR TEMA: uma instrumentação que devolvesse
+      // lista vazia passaria no filtro abaixo sem ter medido nada.
+      expect(pares.length, `${hex}/${nome}: nenhum par medido`).toBeGreaterThanOrEqual(
+        PARES_DE_HOJE[nome],
+      );
+      const reprovas = pares.filter((p) => !p.passa);
+      expect(
+        reprovas,
+        `${hex}/${nome}: ` +
+          reprovas
+            .map((r) => `${r.papel}×${r.superficie}=${r.razao.toFixed(2)}<${r.piso}`)
+            .join(" | "),
+      ).toEqual([]);
+    }
+  });
 
   it("a instrumentação vê os papéis frágeis — inclusive o de stop fixo por tema", () => {
     // O anel de foco usa stop FIXO por tema (500 no claro, 400 no escuro,
@@ -250,7 +258,10 @@ describe("o que o produto pinta — todo par, toda semente", () => {
     const pintados = pintadosDaSemente("#506d48");
     for (const { nome } of TEMAS) {
       const papeis = new Set(pintados[nome].map((p) => p.papel));
-      expect([...papeis].some((p) => p.includes(":focus-visible")), nome).toBe(true);
+      expect(
+        [...papeis].some((p) => p.includes(":focus-visible")),
+        nome,
+      ).toBe(true);
       expect([...papeis], nome).toContain("--ring");
       expect(papeis.size, nome).toBe(REGUA[nome].papeis.length);
     }
@@ -337,8 +348,8 @@ describe("o bloco emitido não pode contradizer o globals.css", () => {
 });
 
 describe("controle positivo — contraste das marcas configuradas", () => {
-  it("a antiga Sage continua legível contra as superfícies Clay do produto", () => {
-    // A marca Sage continua suportada depois de o produto migrar para Clay.
+  it("a antiga Sage continua legível contra as superfícies neutras do produto", () => {
+    // A marca Sage continua suportada depois de o produto migrar para neutros.
     // Estes são pares pintados, não só números internos da derivação.
     const cor = corDe("#506d48");
     expect(cor.derivada?.claro.deslocamento).toBe(0);
@@ -346,14 +357,14 @@ describe("controle positivo — contraste das marcas configuradas", () => {
 
     const p = pintadosDaSemente("#506d48");
     // Claro: anel de foco nas duas superfícies realmente pintadas.
-    expect(foco(p.claro, "--color-bg")).toBeCloseTo(3.77, 2);
-    expect(foco(p.claro, "--color-surface-elevated")).toBeCloseTo(3.52, 2);
+    expect(foco(p.claro, "--color-bg")).toBeCloseTo(3.76, 2);
+    expect(foco(p.claro, "--color-surface-elevated")).toBeCloseTo(3.57, 2);
     // Escuro: a rampa derivada conserva separação suficiente para o foco.
-    expect(foco(p.escuro, "--color-bg")).toBeCloseTo(6.49, 2);
-    expect(foco(p.escuro, "--color-surface-elevated")).toBeCloseTo(5.52, 2);
+    expect(foco(p.escuro, "--color-bg")).toBeCloseTo(6.11, 2);
+    expect(foco(p.escuro, "--color-surface-elevated")).toBeCloseTo(4.8, 2);
     // Também medir o foco sobre a superfície tingida, onde o contraste aperta.
-    expect(foco(p.escuro, "--color-accent-soft@--color-surface")).toBeCloseTo(4.76, 2);
-    expect(foco(p.escuro, "--color-accent-soft@--color-surface-elevated")).toBeCloseTo(4.29, 2);
+    expect(foco(p.escuro, "--color-accent-soft@--color-surface")).toBeCloseTo(4.25, 2);
+    expect(foco(p.escuro, "--color-accent-soft@--color-surface-elevated")).toBeCloseTo(3.71, 2);
   });
 
   it("sem marca configurada nada é injetado, e a tela fica como está", () => {
@@ -370,10 +381,10 @@ describe("a navy #0f172a — o defeito que a prova em tela achou", () => {
     // pintava `--color-accent-400: #545f77`, o stop CRU. O tema escuro anda -1,
     // então o anel agora pinta `#828a9d`, o stop 300 da rampa da marca.
     const p = pintadosDaSemente("#0f172a");
-    expect(foco(p.claro, "--color-bg")).toBeCloseTo(10.71, 2);
-    expect(foco(p.claro, "--color-surface-elevated")).toBeCloseTo(9.98, 2);
-    expect(foco(p.escuro, "--color-bg")).toBeCloseTo(5.45, 2);
-    expect(foco(p.escuro, "--color-surface-elevated")).toBeCloseTo(4.64, 2);
+    expect(foco(p.claro, "--color-bg")).toBeCloseTo(10.67, 2);
+    expect(foco(p.claro, "--color-surface-elevated")).toBeCloseTo(10.12, 2);
+    expect(foco(p.escuro, "--color-bg")).toBeCloseTo(5.13, 2);
+    expect(foco(p.escuro, "--color-surface-elevated")).toBeCloseTo(4.03, 2);
     for (const superficie of ["--color-bg", "--color-surface-elevated"] as const) {
       expect(foco(p.escuro, superficie), superficie).toBeGreaterThanOrEqual(PISOS.componente);
     }

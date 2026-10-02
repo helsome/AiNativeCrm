@@ -124,7 +124,7 @@ export function MissionExplicitOfferPanel({ missionId, leadId, active }: {
           {active && (
             <div className="grid gap-2 sm:grid-cols-2">
               <label>客户 WhatsApp 会话
-                <select className="mt-1 w-full rounded border bg-background p-1"
+                <select className="mt-1 w-full rounded-md border bg-background p-1"
                   value={conversationId} onChange={(event) => setConversationId(event.target.value)}>
                   {(evidence?.eligibleConversations ?? []).map((item) => (
                     <option key={item.id} value={item.id}>{item.label} · {item.id.slice(0, 8)}</option>
@@ -132,35 +132,35 @@ export function MissionExplicitOfferPanel({ missionId, leadId, active }: {
                 </select>
               </label>
               <label>项目
-                <input className="mt-1 w-full rounded border bg-background p-1"
+                <input className="mt-1 w-full rounded-md border bg-background p-1"
                   value={description} onChange={(event) => setDescription(event.target.value)}
                   maxLength={160} />
               </label>
               <label>报价金额
-                <input className="mt-1 w-full rounded border bg-background p-1"
+                <input className="mt-1 w-full rounded-md border bg-background p-1"
                   inputMode="decimal" placeholder="1234.50" value={amount}
                   onChange={(event) => setAmount(event.target.value)} />
               </label>
               <label>币种
-                <select className="mt-1 w-full rounded border bg-background p-1"
+                <select className="mt-1 w-full rounded-md border bg-background p-1"
                   value={currency} onChange={(event) => setCurrency(event.target.value)}>
                   {["CNY", "BRL", "USD", "EUR"].map((item) =>
                     <option key={item} value={item}>{item}</option>)}
                 </select>
               </label>
               <label>交期
-                <input className="mt-1 w-full rounded border bg-background p-1"
+                <input className="mt-1 w-full rounded-md border bg-background p-1"
                   type="date" value={deliveryDate}
                   onChange={(event) => setDeliveryDate(event.target.value)} />
               </label>
-              <button className="self-end rounded border px-2 py-1 disabled:opacity-50"
+              <button className="self-end rounded-md border px-2 py-1 disabled:opacity-50"
                 disabled={busy || !evidence?.eligibleConversations.length}
                 onClick={() => void issue()}>固定这版条款</button>
             </div>
           )}
           {evidence && <p role="status">{labels[evidence.verdict]}</p>}
           {evidence?.offerText && (
-            <div className="rounded bg-muted p-2">
+            <div className="rounded-md bg-muted p-2">
               <p>必须原样发送以下完整文本；修改金额、交期或确认码后不会被核验：</p>
               <pre className="mt-1 whitespace-pre-wrap break-words select-all">{evidence.offerText}</pre>
               <a className="mt-2 inline-block underline" href={`/app/ai/workbench?leadId=${encodeURIComponent(leadId)}`}>

@@ -76,19 +76,19 @@ export function FeishuBinding() {
             "租户尚未连接"}
       </p>
       {!status?.userBound && status?.canClaimTenant && (
-        <button className="mt-3 rounded border px-3 py-2 text-sm" disabled={busy}
+        <button className="mt-3 rounded-md border px-3 py-2 text-sm" disabled={busy}
           onClick={() => void begin("tenant_owner")}>
           连接组织飞书租户
         </button>
       )}
       {!status?.userBound && status?.tenantBound && (
-        <button className="mt-3 rounded border px-3 py-2 text-sm" disabled={busy}
+        <button className="mt-3 rounded-md border px-3 py-2 text-sm" disabled={busy}
           onClick={() => void begin("member")}>
           绑定我的飞书账号
         </button>
       )}
       {message && (
-        <div className="mt-3 rounded bg-muted p-3 text-sm">
+        <div className="mt-3 rounded-md bg-muted p-3 text-sm">
           <p>请私聊已安装的应用机器人，发送以下整行口令；仅显示本次，十分钟后失效：</p>
           <code className="mt-2 block break-all select-all">{message}</code>
           <p className="mt-2 text-xs text-muted-foreground">有效期至 {new Date(expiresAt).toLocaleString()}</p>

@@ -82,19 +82,11 @@ describe("Tailwind 4 — a ponte token → utilitário", () => {
 
     expect(consumidos.length).toBeGreaterThan(50);
 
-    // As duas fontes são injetadas pelo `next/font` como custom property no
-    // `<html>` (app/layout.tsx), não pelo `:root` do CSS — por isso não caem na
-    // regra acima. A isenção não é um buraco: o teste confere logo abaixo que
-    // elas continuam sendo declaradas lá.
-    const DE_FORA_DO_CSS = ["--font-atkinson", "--font-mono"];
+    // Font stacks are local CSS tokens, so no build-time font download or exemption.
     const layout = fs.readFileSync(path.join(RAIZ, "app/layout.tsx"), "utf8");
-    for (const v of DE_FORA_DO_CSS) {
-      expect(layout, `${v} deixou de ser declarada pelo next/font`).toContain(`"${v}"`);
-    }
+    expect(layout).not.toContain("next/font/google");
 
-    const orfaos = [...new Set(consumidos)].filter(
-      (v) => !raiz.has(v) && !DE_FORA_DO_CSS.includes(v),
-    );
+    const orfaos = [...new Set(consumidos)].filter((v) => !raiz.has(v));
     expect(orfaos, `tokens referenciados no @theme mas ausentes do :root`).toEqual([]);
   });
 
@@ -237,7 +229,9 @@ describe("Tailwind 4 — utilitários que mudaram de significado", () => {
     // Não dá para consertar pelo `@theme`: o `.shadow` do v4 é embutido com
     // valor literal e o embutido vence — igual ao `rounded`.
     const culpados = ocorrencias(ARQUIVOS, /(?<=[\s"'`:])shadow(?=[\s"'`!]|$)/g);
-    expect(culpados, "use `shadow-sm` (o `--shadow-sm` do produto) ou o grau explícito").toEqual([]);
+    expect(culpados, "use `shadow-sm` (o `--shadow-sm` do produto) ou o grau explícito").toEqual(
+      [],
+    );
   });
 
   it("não usa `flex-shrink-*` / `flex-grow-*` — renomeados para `shrink-*` / `grow-*`", () => {
@@ -588,8 +582,10 @@ describe("Tailwind 4 — alpha em cor de texto agora PINTA, então precisa passa
     // Controle positivo: a árvore comprovadamente TEM alphas de cor de texto.
     // Se a contagem de medições zerar, a guarda cegou (regex, paleta renomeada,
     // `bloco()` mudando de forma) e o verde seria falso.
-    expect(medidos, `guarda cega: nenhum alpha medido. Não-medidos: ${naoMedidos.join(", ")}`)
-      .toBeGreaterThan(0);
+    expect(
+      medidos,
+      `guarda cega: nenhum alpha medido. Não-medidos: ${naoMedidos.join(", ")}`,
+    ).toBeGreaterThan(0);
 
     expect(
       [...new Set(reprovados)].sort(),

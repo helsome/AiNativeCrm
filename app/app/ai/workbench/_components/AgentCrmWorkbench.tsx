@@ -90,9 +90,16 @@ type Detail = Run & {
   usage?: { inputTokens: number; outputTokens: number; costCents: number; calls: number };
   evaluation?: EvaluationReport;
   observed_evidence?: Array<{
-    id: string; namespace: string; title: string; excerpt: string; source_id: string;
-    revision: string | null; revision_kind: string; index_status: string | null;
-    uri: string | null; position?: number;
+    id: string;
+    namespace: string;
+    title: string;
+    excerpt: string;
+    source_id: string;
+    revision: string | null;
+    revision_kind: string;
+    index_status: string | null;
+    uri: string | null;
+    position?: number;
   }>;
 };
 type EvaluationReport = {
@@ -661,7 +668,7 @@ export function AgentCrmWorkbench({
       data-agent-workbench
       className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border bg-card"
     >
-      <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b p-3">
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b p-3 sm:px-5">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <label htmlFor="agent-picker" className="sr-only">
             内置 Agent
@@ -693,21 +700,21 @@ export function AgentCrmWorkbench({
           <button
             ref={settingsButtonRef}
             onClick={() => openPanel("settings")}
-            className="rounded-md px-3 py-2 text-sm hover:bg-muted"
+            className="min-h-11 rounded-md px-3 py-2 text-sm hover:bg-muted lg:min-h-9"
           >
             任务设置
           </button>
           <button
             ref={detailsButtonRef}
             onClick={() => openPanel("details")}
-            className="rounded-md px-3 py-2 text-sm hover:bg-muted"
+            className="min-h-11 rounded-md px-3 py-2 text-sm hover:bg-muted lg:min-h-9"
           >
             运行详情{pending.length > 0 ? ` · ${pending.length} 待确认` : ""}
           </button>
           <button
             disabled={cannotStart}
             onClick={resetConversation}
-            className="rounded-md border px-3 py-2 text-sm disabled:opacity-50"
+            className="min-h-11 rounded-md border px-3 py-2 text-sm disabled:opacity-50 lg:min-h-9"
           >
             新对话
           </button>
@@ -721,8 +728,10 @@ export function AgentCrmWorkbench({
         className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain p-4 sm:p-6"
       >
         {!detail && !submittedTask && previousTurns.length === 0 && (
-          <div className="mx-auto max-w-2xl py-6 sm:py-10">
-            <h2 className="text-xl font-semibold">今天想推进哪件事？</h2>
+          <div className="mx-auto max-w-2xl py-8 sm:py-14">
+            <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+              今天想推进哪件事？
+            </h2>
             <p className="mt-2 text-sm text-muted-foreground">
               {selected?.description || "选择 Agent，输入目标，从真实 CRM 上下文开始。"}
             </p>
@@ -734,7 +743,7 @@ export function AgentCrmWorkbench({
                     setTask(scenario.task);
                     composerRef.current?.focus();
                   }}
-                  className="rounded-lg border p-3 text-left text-sm hover:bg-muted"
+                  className="rounded-lg border border-border bg-surface p-4 text-left text-sm transition-colors hover:bg-muted"
                 >
                   <span className="block font-medium">{scenario.title}</span>
                   <span className="mt-1 block text-xs text-muted-foreground">
@@ -747,17 +756,17 @@ export function AgentCrmWorkbench({
         )}
         {previousTurns.map((turn) => (
           <section key={turn.id} className="mx-auto max-w-3xl space-y-3" aria-label="之前的运行">
-            <p className="ml-auto w-fit max-w-[90%] rounded-xl bg-primary/10 px-4 py-3 text-sm break-words whitespace-pre-wrap">
+            <p className="ml-auto w-fit max-w-[90%] rounded-xl bg-muted px-4 py-3 text-sm break-words whitespace-pre-wrap">
               {turn.task}
             </p>
-            <article className="rounded-xl bg-muted/40 p-4 text-sm leading-6 break-words whitespace-pre-wrap">
+            <article className="rounded-lg bg-surface p-4 text-sm leading-6 break-words whitespace-pre-wrap">
               {turn.final_text || `运行状态：${turn.status}`}
             </article>
           </section>
         ))}
         {displayedTask && (
           <section className="mx-auto max-w-3xl space-y-3" aria-label="当前运行">
-            <p className="ml-auto w-fit max-w-[90%] rounded-xl bg-primary/10 px-4 py-3 text-sm break-words whitespace-pre-wrap">
+            <p className="ml-auto w-fit max-w-[90%] rounded-xl bg-muted px-4 py-3 text-sm break-words whitespace-pre-wrap">
               {displayedTask}
             </p>
             <div role="status" className="text-xs text-muted-foreground">
@@ -769,7 +778,7 @@ export function AgentCrmWorkbench({
               {latestEvent ? ` · ${eventLabel(latestEvent)}` : ""}
             </div>
             {detail?.final_text && (
-              <article className="rounded-xl bg-muted/40 p-4 text-sm leading-6 break-words whitespace-pre-wrap">
+              <article className="rounded-lg bg-surface p-4 text-sm leading-6 break-words whitespace-pre-wrap">
                 {detail.final_text}
               </article>
             )}
@@ -794,7 +803,7 @@ export function AgentCrmWorkbench({
       </div>
       <form
         aria-label="发送 Agent 任务"
-        className="shrink-0 space-y-2 border-t p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+        className="mx-auto w-full max-w-3xl shrink-0 space-y-3 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5"
         onSubmit={(event) => {
           event.preventDefault();
           if (!cannotStart) void run();
@@ -832,7 +841,7 @@ export function AgentCrmWorkbench({
             </button>
           )}
         </div>
-        <div className="flex items-end gap-2">
+        <div className="flex items-end gap-2 rounded-xl border border-border bg-surface p-2 shadow-sm focus-within:border-border-strong">
           <label htmlFor="agent-task" className="sr-only">
             给 Agent 的任务
           </label>
@@ -855,7 +864,7 @@ export function AgentCrmWorkbench({
               }
             }}
             placeholder="例如：找出停滞商机并建议明天的跟进计划…"
-            className="max-h-32 min-h-12 min-w-0 flex-1 resize-none overflow-y-auto rounded-lg border bg-background p-3 text-sm focus:ring-2 focus:ring-ring"
+            className="max-h-32 min-h-12 min-w-0 flex-1 resize-none overflow-y-auto rounded-md border-0 bg-transparent p-3 text-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden"
           />
           {activeRun ? (
             <button
@@ -876,7 +885,7 @@ export function AgentCrmWorkbench({
             </button>
           )}
         </div>
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           Enter 发送 · Shift+Enter 换行 · 每次发送创建独立运行，CRM 提供上下文
         </p>
       </form>
@@ -1054,7 +1063,8 @@ export function AgentCrmWorkbench({
                   知识来源与索引设置
                 </a>
                 <p className="text-xs text-muted-foreground">
-                  Wiki 检索还需要可用的 embedding 凭据和已完成的来源索引；仅配置聊天模型不代表知识库已就绪。
+                  Wiki 检索还需要可用的 embedding
+                  凭据和已完成的来源索引；仅配置聊天模型不代表知识库已就绪。
                 </p>
               </fieldset>
             ) : (
@@ -1080,14 +1090,23 @@ export function AgentCrmWorkbench({
                             客户发送已被负责人暂停；旧审批不能继续发送。
                           </p>
                         )}
-                        <MissionSendControl key={detail.mission.id} mission={detail.mission}
+                        <MissionSendControl
+                          key={detail.mission.id}
+                          mission={detail.mission}
                           onUpdated={async (paused) => {
                             const runId = detail.id;
-                            setDetail((current) => current?.id === runId && current.mission
-                              ? { ...current, mission: { ...current.mission, customer_send_paused: paused } } : current);
+                            setDetail((current) =>
+                              current?.id === runId && current.mission
+                                ? {
+                                    ...current,
+                                    mission: { ...current.mission, customer_send_paused: paused },
+                                  }
+                                : current,
+                            );
                             const updated = await fetchDetail(runId);
-                            setDetail((current) => current?.id === runId ? updated : current);
-                          }} />
+                            setDetail((current) => (current?.id === runId ? updated : current));
+                          }}
+                        />
                         {detail.mission.acceptance_contract?.checks.map((check) => (
                           <p key={check.kind} className="text-xs text-muted-foreground">
                             可观察条件：
@@ -1150,10 +1169,16 @@ export function AgentCrmWorkbench({
                             </p>
                             {proposal.tool_name === "crm_schedule_followup" && (
                               <div className="mt-2 rounded-md bg-muted p-2 text-xs">
-                                <p>目标 {String(proposal.preview.targetKind ?? "待核对")}：{String(proposal.preview.targetId ?? "未记录")}</p>
-                                <p>时间：{typeof proposal.preview.inHours === "number"
-                                  ? `执行批准后 ${proposal.preview.inHours} 小时`
-                                  : String(proposal.preview.promisedAt ?? "未记录，请先核对")}</p>
+                                <p>
+                                  目标 {String(proposal.preview.targetKind ?? "待核对")}：
+                                  {String(proposal.preview.targetId ?? "未记录")}
+                                </p>
+                                <p>
+                                  时间：
+                                  {typeof proposal.preview.inHours === "number"
+                                    ? `执行批准后 ${proposal.preview.inHours} 小时`
+                                    : String(proposal.preview.promisedAt ?? "未记录，请先核对")}
+                                </p>
                               </div>
                             )}
                             {proposal.tool_name === "ask_internal_colleague" &&
@@ -1273,7 +1298,7 @@ export function AgentCrmWorkbench({
                         </div>
                         <div className="mt-2 space-y-1">
                           {detail.evaluation.dimensions.map((dimension) => (
-                            <details key={dimension.key} className="rounded border p-2">
+                            <details key={dimension.key} className="rounded-md border p-2">
                               <summary className="cursor-pointer text-muted-foreground">
                                 {dimension.label} · {dimension.verdict}
                                 {dimension.score === null ? "" : ` · ${dimension.score}`}
@@ -1281,12 +1306,19 @@ export function AgentCrmWorkbench({
                               {dimension.findings.length > 0 ? (
                                 <ul className="mt-2 space-y-1">
                                   {dimension.findings.map((finding) => (
-                                    <li key={finding.code}>{finding.message}
-                                      <span className="block text-[10px] text-muted-foreground">{finding.code}</span>
+                                    <li key={finding.code}>
+                                      {finding.message}
+                                      <span className="block text-[10px] text-muted-foreground">
+                                        {finding.code}
+                                      </span>
                                     </li>
                                   ))}
                                 </ul>
-                              ) : <p className="mt-2 text-muted-foreground">此项检查未发现问题；不代表业务结果已验收。</p>}
+                              ) : (
+                                <p className="mt-2 text-muted-foreground">
+                                  此项检查未发现问题；不代表业务结果已验收。
+                                </p>
+                              )}
                             </details>
                           ))}
                         </div>
@@ -1346,7 +1378,7 @@ export function AgentCrmWorkbench({
                         className="w-full rounded-md p-2 text-left hover:bg-muted"
                       >
                         <span className="block truncate text-xs">{item.task}</span>
-                        <span className="text-[11px] text-muted-foreground">
+                        <span className="text-xs text-muted-foreground">
                           {item.status} · {new Date(item.created_at).toLocaleString()}
                         </span>
                       </button>
@@ -1379,21 +1411,42 @@ export function AgentCrmWorkbench({
                   </details>
                 )}
                 {Boolean(detail?.observed_evidence?.length) && (
-                  <section className="space-y-3 rounded-lg border p-3 text-sm" aria-label="实际读取的知识证据">
+                  <section
+                    className="space-y-3 rounded-lg border p-3 text-sm"
+                    aria-label="实际读取的知识证据"
+                  >
                     <h3 className="font-semibold">实际读取的知识证据</h3>
-                    <p className="text-xs text-muted-foreground">来自本次运行成功工具观察，已重新核对当前来源权限。索引版本不等于商业政策批准。</p>
+                    <p className="text-xs text-muted-foreground">
+                      来自本次运行成功工具观察，已重新核对当前来源权限。索引版本不等于商业政策批准。
+                    </p>
                     {detail!.observed_evidence!.map((item) => (
-                      <details key={`${item.id}:${item.revision}`} className="rounded border p-2">
-                        <summary className="cursor-pointer font-medium">{item.title}
+                      <details
+                        key={`${item.id}:${item.revision}`}
+                        className="rounded-md border p-2"
+                      >
+                        <summary className="cursor-pointer font-medium">
+                          {item.title}
                           {item.index_status === "superseded" ? " · 索引已有更新，请重查" : ""}
                         </summary>
-                        <p className="mt-2 whitespace-pre-wrap break-words">{item.excerpt}</p>
-                        <p className="mt-2 break-all text-xs text-muted-foreground">
-                          {item.revision_kind === "index_version" ? "索引版本" : "记忆快照"}：{item.revision ?? "未记录"}
+                        <p className="mt-2 break-words whitespace-pre-wrap">{item.excerpt}</p>
+                        <p className="mt-2 text-xs break-all text-muted-foreground">
+                          {item.revision_kind === "index_version" ? "索引版本" : "记忆快照"}：
+                          {item.revision ?? "未记录"}
                           {item.position === undefined ? "" : ` · 片段 ${item.position + 1}`}
                         </p>
-                        <p className="break-all text-xs text-muted-foreground">证据 ID：{item.id}</p>
-                        {item.uri && <a href={item.uri} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs underline">查看来源</a>}
+                        <p className="text-xs break-all text-muted-foreground">
+                          证据 ID：{item.id}
+                        </p>
+                        {item.uri && (
+                          <a
+                            href={item.uri}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-2 inline-block text-xs underline"
+                          >
+                            查看来源
+                          </a>
+                        )}
                       </details>
                     ))}
                   </section>

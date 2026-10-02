@@ -2,6 +2,12 @@
 
 This is a standalone, buildless browser example. Open `dist/index.html` through any ordinary static file server. It does not start the real Next.js CRM, Supabase, an agent worker, a model, or a messaging integration. All customers, prices, dates, approvals and local tasks are fictional.
 
+## Modern neutral visual refresh
+
+The shared visual contract now uses a white working surface, `#F7F8FA` canvas, `#F9FAFB` lightweight sidebar, `#1D1D1F` text, `#6E6E73` secondary text, and `#E5E7EB` dividers. System sans-serif typography, 12px controls, 16px cards, and a 20px composer replace the earlier dense warm/graphite treatment. Primary actions are charcoal; blue is reserved for links, focus, and information states. Source-code inspection, local Runtime Lab, safety labels, 62 routes, and all existing interactions remain intact. The production application's tenant branding is independent and is not overwritten by this standalone example.
+
+`dist/modern.css` is the final visual layer. Supporting CSS has also been neutralized so the local laboratory and older screens stay consistent. The fixed chat composer, keyboard/IME behavior, mobile navigation, content overflow boundaries, safe areas, and reduced-motion rules are retained. `tests/visual-style.cjs` checks CSS property grammar, theme tokens, text contrast and 320/390/768/1440 DOM scenarios. It does not claim pixel rendering or real-device keyboard verification.
+
 ## Inspect the current production-code changes
 
 Click **更新检查 · 36a3af1** in the toolbar, **证据与版本** in Agent chat, or **检查本次更新** in the welcome area. This opens an inspection drawer alongside the retained chat-first UI. All its data is synthetic and explicitly separate from the current simulated chat Run.

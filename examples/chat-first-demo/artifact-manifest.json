@@ -4,25 +4,28 @@
   "sourceReference": "36a3af1e7f3488a8df0a494b3c8f4f4661d32a95",
   "historicalReportReference": "fc80b14dc88406ab6f5e6ec3ed9ca61d632c0674",
   "sha256": {
-    "README.md": "79c3de927dc0e8c54a5c76bd0d11848d3b8d733d3719fc5bcbf3619d679955a5",
+    "README.md": "89460ccf8f5ac3e55c0a329a9727e3deaa3ef72e1d7c303b886cd265a8b5a53e",
     "dist/app.js": "8a0e20f288bedba6edfb70d76187e5935f3c0502449ff370109c2d035c6bcb06",
     "dist/catalog.js": "27307ab43355601f7fd4b58d4125089e2c3692c2114d63fe7519a4e7247a5568",
     "dist/demo-engine.js": "cb1fba112f20c638145ac6ebf2e072b5e0ffff868b625d7bdca65b90d547fc61",
     "dist/demo-fixtures.js": "7dd6cdb84a91e9e5e3d1ff243e1485e9ab08f3bd6457397aff74645a512eb42b",
-    "dist/demo-lab.css": "a6bac05e314af4a14229475e8a32b0bae9e7e7238846984c0258ca92fce35a34",
+    "dist/demo-lab.css": "85f551e8ea09be78e0e0024169e800f9a69413670163804587a6355fd9797222",
     "dist/demo-lab.js": "5b4559fcd9efe9ab65c12f121d234a001cbfcab5097468522bde43e8424fcb14",
     "dist/full-ui.js": "cbe6bbac992a335007a700061ee8e9217b5a99305034d69795a47e0050b7213d",
-    "dist/index.html": "c7f5628d3f985679cb805a1b34a8c6c8a1656074b9408e370f6ccee4c4e5867a",
+    "dist/index.html": "b9a0d87e643dc7c5c5a783af3f327452cdef2473704be7af18e6d0d41ac36e49",
     "dist/inspection.css": "32d14390e28de821c855f0f3ab8d1a85dc0b2ee7f31be297c22822a7a52cc88c",
     "dist/inspection.js": "ca15412760a7a6bb2f99cc5fe7caca13ba78073ec643c051ffb169ebe0ca1077",
-    "dist/style.css": "1d6964ae20a840469e13bdd5a01ee99f1e701e5d0be662ea6f175013b5359618",
-    "package.json": "261334c8e810b327230dbeca846a5a5003202c581d82ed8596b57c78d20d2b61",
+    "dist/modern.css": "2a302f5dd261bdbd1208d4879b503e0fa3009b8e49b2b214abae43df0df931c0",
+    "dist/style.css": "26eadc9a19996e3801a080fc4704388fb4dd68403beee6b78b9f2039e6250673",
+    "package.json": "fcd6b4ab45d80325321806716b458b4bf17c5a5cd3e24f1306fee56a0c7f141a",
     "tests/chat-dom.cjs": "4fc0454a4867e6425a68ae81ac15e25ca2c5b524379154c5fb8621c5570a0026",
     "tests/coverage.json": "a669c51a96658d6c66da69310361119af91607657e5a0fab11aa4b9511209af4",
     "tests/full-smoke.cjs": "eeffda330c342e92cb5d652b8ffb604890fa08fb6eb9272849cfcbe7e129b158",
     "tests/inspection-dom.cjs": "dc1bbdbb1ca65eb5b9b7425f012923efaf7f483fd08e3c6a20e1ae77bc0bd716",
     "tests/runtime-lab-dom.cjs": "287e983ff32c50e7330d347636c45899f3827afdd82e5ec5fce291e24690f277",
     "tests/runtime-lab.cjs": "5bc249ba8080937c44f1780191b0d3481214dcf3efc59f11d2c095141f1fc499",
-    "tests/smoke.cjs": "216f2f07384e04515f4fbbb51a17a9ea05c1dccfcf73b50428acda86687b3307"
-  }
+    "tests/smoke.cjs": "216f2f07384e04515f4fbbb51a17a9ea05c1dccfcf73b50428acda86687b3307",
+    "tests/visual-style.cjs": "d8927c408ed183200803b5a660a550bd30e40ace6494c17b0b3d4927adc1b34c"
+  },
+  "visualTheme": "neutral-sans-2026-10-02"
 }

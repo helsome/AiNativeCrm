@@ -1,3 +1,16 @@
+:root,
+.ds-local-fonts {
+  --font-bricolage: "Bricolage Grotesque", var(--font-system-sans);
+  --font-jakarta: "Plus Jakarta Sans", var(--font-system-sans);
+  --font-fraunces: "Fraunces", ui-serif, Georgia, serif;
+  --font-manrope: "Manrope", var(--font-system-sans);
+  --font-atkinson: "Atkinson Hyperlegible", var(--font-system-sans);
+  --font-source-serif: "Source Serif 4", ui-serif, Georgia, serif;
+  --font-plex-sans: "IBM Plex Sans", var(--font-system-sans);
+  --font-plex-mono: "IBM Plex Mono", var(--font-system-mono);
+  --font-jetbrains: "JetBrains Mono", var(--font-system-mono);
+}
+
 /* Design showcase — scoped styles. Variables driven by VariantProvider. */
 
 .ds-root {
