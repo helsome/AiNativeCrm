@@ -14,7 +14,9 @@ test.describe("auth flow", () => {
     await page.locator("#email").fill("nobody@example.com");
     await page.locator("#password").fill("wrong-password-xyz");
     await page.getByRole("button", { name: /entrar/i }).click();
-    await expect(page.getByRole("alert")).toBeVisible();
+    await expect(
+      page.getByRole("alert").filter({ hasText: "Email ou senha incorretos." }),
+    ).toBeVisible();
     expect(page.url()).not.toMatch(/\/app\//);
   });
 
@@ -47,7 +49,7 @@ test.describe("Chinese login contract", () => {
     await page.locator("#email").fill("nobody@example.com");
     await page.locator("#password").fill("wrong-password-xyz");
     await page.getByRole("button", { name: "登录", exact: true }).click();
-    await expect(page.getByRole("alert")).toContainText("邮箱或密码错误");
+    await expect(page.getByRole("alert").filter({ hasText: "邮箱或密码错误" })).toBeVisible();
     expect(page.url()).not.toMatch(/\/app\//);
   });
 });
