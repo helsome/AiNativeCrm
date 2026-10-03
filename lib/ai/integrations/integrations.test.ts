@@ -236,6 +236,8 @@ function memoryFixture() {
     write_outcome: "never_started",
     deleted_at: null as string | null,
     remote_deleted_at: null as string | null,
+    created_at: "2026-10-01T12:34:56.789Z",
+    updated_at: "2026-10-02T12:34:56.789Z",
   };
   let available = true;
   const { pool, query } = sqlPool((sql, values) => {
@@ -294,14 +296,33 @@ describe("Mem0 controlled real service paths", () => {
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
     const result = await readConfirmedCustomerMemory(f.pool, org, contact);
-    expect(result).toMatchObject({ status: "local", coverage: "complete", providerStatus: "disabled" });
-    expect(result.memories).toEqual([expect.objectContaining({ id: memoryId, body: f.row.body })]);
+    expect(result).toMatchObject({
+      status: "local",
+      coverage: "complete",
+      providerStatus: "disabled",
+    });
+    expect(result).toMatchObject({ source: "crm_confirmed_facts", schemaVersion: 1 });
+    expect(result.memories).toEqual([
+      expect.objectContaining({
+        id: memoryId,
+        body: f.row.body,
+        confirmed: true,
+        revision: f.row.content_hash,
+        authority: "customer_context_only",
+        created_at: f.row.created_at,
+        updated_at: f.row.updated_at,
+      }),
+    ]);
     expect(fetch).not.toHaveBeenCalled();
-    await expect(readConfirmedCustomerMemory(f.pool, other, contact)).rejects.toThrow("contact_unavailable");
+    await expect(readConfirmedCustomerMemory(f.pool, other, contact)).rejects.toThrow(
+      "contact_unavailable",
+    );
     f.row.deleted_at = "2026-10-03T00:00:00Z";
     expect((await readConfirmedCustomerMemory(f.pool, org, contact)).memories).toEqual([]);
     f.unavailable();
-    await expect(readConfirmedCustomerMemory(f.pool, org, contact)).rejects.toThrow("contact_unavailable");
+    await expect(readConfirmedCustomerMemory(f.pool, org, contact)).rejects.toThrow(
+      "contact_unavailable",
+    );
   });
   it("writes infer:false once, verifies ownership and replays without duplicate creation", async () => {
     const f = memoryFixture();
@@ -380,25 +401,56 @@ describe("Mem0 controlled real service paths", () => {
     expect(f.row.remote_deleted_at).toBeNull();
   });
   it("does not confirm cleanup while an earlier ADD is still in flight", async () => {
-    const f = memoryFixture(); let records: unknown[] = []; let posts = 0;
-    let release!: () => void; let started!: () => void;
-    const entered = new Promise<void>((resolve) => { started = resolve; });
-    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const f = memoryFixture();
+    let records: unknown[] = [];
+    let posts = 0;
+    let release!: () => void;
+    let started!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     const http = vi.fn(async (url, init) => {
-      if (String(url).endsWith("/openapi.json")) return j({ components: { schemas: { MemoryCreate: { properties: { infer: {} } }, SearchRequest: { properties: { filters: {} } } } } });
-      if (init.method === "POST") { posts++; started(); await pending; records = [f.remote()]; return j({ results: [{ id: "remote-1" }] }); }
-      if (init.method === "DELETE") { records = []; return j({ message: "deleted" }); }
+      if (String(url).endsWith("/openapi.json"))
+        return j({
+          components: {
+            schemas: {
+              MemoryCreate: { properties: { infer: {} } },
+              SearchRequest: { properties: { filters: {} } },
+            },
+          },
+        });
+      if (init.method === "POST") {
+        posts++;
+        started();
+        await pending;
+        records = [f.remote()];
+        return j({ results: [{ id: "remote-1" }] });
+      }
+      if (init.method === "DELETE") {
+        records = [];
+        return j({ message: "deleted" });
+      }
       return j({ results: records });
     });
     const add = syncCustomerMemory(f.pool, org, memoryId, http as unknown as typeof fetch);
     await entered;
-    f.row.deleted_at = "2026-10-02T00:00:00Z"; f.row.sync_state = "deleted";
-    expect(await syncCustomerMemory(f.pool, org, memoryId, http as unknown as typeof fetch)).toBe("reconciliation_required");
+    f.row.deleted_at = "2026-10-02T00:00:00Z";
+    f.row.sync_state = "deleted";
+    expect(await syncCustomerMemory(f.pool, org, memoryId, http as unknown as typeof fetch)).toBe(
+      "reconciliation_required",
+    );
     expect(f.row.remote_deleted_at).toBeNull();
-    release(); await add;
+    release();
+    await add;
     expect(f.row.sync_state).toBe("deleted");
-    expect(await syncCustomerMemory(f.pool, org, memoryId, http as unknown as typeof fetch)).toBe("deleted");
-    expect(f.row.remote_deleted_at).not.toBeNull(); expect(posts).toBe(1);
+    expect(await syncCustomerMemory(f.pool, org, memoryId, http as unknown as typeof fetch)).toBe(
+      "deleted",
+    );
+    expect(f.row.remote_deleted_at).not.toBeNull();
+    expect(posts).toBe(1);
   });
   it("refuses older REST schemas, cross-tenant memory and contact revocation", async () => {
     const f = memoryFixture();
@@ -525,14 +577,18 @@ describe("WeKnora current-source Wiki evidence", () => {
     const prior = f.query.getMockImplementation()!;
     f.query.mockImplementation(async (query, values) => {
       const sql = typeof query === "string" ? query : query.text;
-      if (sql.includes("select source_id,manifest,content")) return { rows: [{ source_id: sourceId, manifest: f.manifests[0], content: f.page.content }] };
+      if (sql.includes("select source_id,manifest,content"))
+        return {
+          rows: [{ source_id: sourceId, manifest: f.manifests[0], content: f.page.content }],
+        };
       return prior(query, values);
     });
     vi.stubGlobal("fetch", f.http);
     expect(await readCompanyWikiEvidence(f.pool, org, memoryId)).not.toBeNull();
     f.page.version += 1;
     expect(await readCompanyWikiEvidence(f.pool, org, memoryId)).toBeNull();
-    f.page.version -= 1; f.page.status = "archived";
+    f.page.version -= 1;
+    f.page.status = "archived";
     await expect(readCompanyWikiEvidence(f.pool, org, memoryId)).rejects.toThrow();
   });
   it("never queries unselected KBs and refuses foreign, withdrawn, stale or mixed-source pages", async () => {

@@ -32,6 +32,8 @@ interface MemoryRow {
   write_outcome: "never_started" | "in_flight" | "confirmed" | "unknown";
   deleted_at: string | null;
   remote_deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 const remoteSchema = z
   .object({
@@ -327,36 +329,37 @@ export async function readConfirmedCustomerMemory(
   let ids: string[] = [];
   let status = binding ? "local_fallback" : "local";
   let providerStatus = binding ? "unavailable" : "disabled";
-  if (binding) try {
-    const payload = await mem0Json(binding, "/search", {
-      method: "POST",
-      signal,
-      body: JSON.stringify({
-        query: query.slice(0, 2000),
-        filters: { user_id: userScope(org, contact) },
-        top_k: 10,
-      }),
-    });
-    const results = z.object({ results: z.array(z.unknown()).max(100) }).parse(payload).results;
-    // Remote content is never trusted: rank only known owned IDs, then use current local facts.
-    ids = results
-      .map((value) => remoteSchema.parse(value))
-      .filter((value) => value.user_id === userScope(org, contact))
-      .flatMap((value) =>
-        local.rows
-          .filter(
-            (row) =>
-              row.external_id === value.id &&
-              value.metadata.crm_id === memoryScope(org, row.id) &&
-              value.metadata.crm_hash === row.content_hash,
-          )
-          .map((row) => row.id),
-      );
-    status = "mem0";
-    providerStatus = "connected";
-  } catch {
-    signal?.throwIfAborted();
-  }
+  if (binding)
+    try {
+      const payload = await mem0Json(binding, "/search", {
+        method: "POST",
+        signal,
+        body: JSON.stringify({
+          query: query.slice(0, 2000),
+          filters: { user_id: userScope(org, contact) },
+          top_k: 10,
+        }),
+      });
+      const results = z.object({ results: z.array(z.unknown()).max(100) }).parse(payload).results;
+      // Remote content is never trusted: rank only known owned IDs, then use current local facts.
+      ids = results
+        .map((value) => remoteSchema.parse(value))
+        .filter((value) => value.user_id === userScope(org, contact))
+        .flatMap((value) =>
+          local.rows
+            .filter(
+              (row) =>
+                row.external_id === value.id &&
+                value.metadata.crm_id === memoryScope(org, row.id) &&
+                value.metadata.crm_hash === row.content_hash,
+            )
+            .map((row) => row.id),
+        );
+      status = "mem0";
+      providerStatus = "connected";
+    } catch {
+      signal?.throwIfAborted();
+    }
   await assertContact(pool, org, contact);
   const fresh = await integrationQuery<MemoryRow>(
     pool,
@@ -372,6 +375,7 @@ export async function readConfirmedCustomerMemory(
   return {
     status,
     source: "crm_confirmed_facts",
+    schemaVersion: 1,
     providerStatus,
     coverage: ordered.length > 10 ? "partial" : "complete",
     returnedCount: Math.min(ordered.length, 10),
@@ -382,6 +386,9 @@ export async function readConfirmedCustomerMemory(
       category: row.category,
       body: row.body,
       revision: row.content_hash,
+      confirmed: true,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
       authority: "customer_context_only",
     })),
   };

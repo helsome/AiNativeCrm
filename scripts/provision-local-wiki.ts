@@ -52,6 +52,18 @@ async function main() {
     writeFileSync(path, text, { mode: 0o600 });
   };
   const base = "http://127.0.0.1:8088";
+  // The deployed upstream ignored max_pages_per_ingest=2 and generated 11 pages.
+  // Reusing a configured read-only fixture must not silently start paid synthesis.
+  const requiresProvisioning = [
+    "WEKNORA_MODEL_ID",
+    "WEKNORA_KB_ID",
+    "WEKNORA_API_KEY",
+    "WEKNORA_DOCUMENT_ID",
+  ].some((key) => !values[key]);
+  assert(
+    !requiresProvisioning || process.argv.includes("--allow-unbounded-synthetic-ingest"),
+    "wiki_fixture_missing_explicit_unbounded_synthesis_approval_required",
+  );
   let token = "";
   async function api<T = WikiResponse>(
     route: string,
@@ -141,7 +153,6 @@ async function main() {
           },
           wiki_config: {
             synthesis_model_id: values.WEKNORA_MODEL_ID,
-            max_pages_per_ingest: 2,
             extraction_granularity: "focused",
             content_instructions:
               "用简体中文整理，明确标注为演示合成资料。所有结论都需要原文引用。",
