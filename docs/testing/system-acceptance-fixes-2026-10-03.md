@@ -1,0 +1,55 @@
+# 系统验收问题修复与真实复验（2026-10-03）
+
+## 结论
+
+已修复多 Agent 提前停止的累计用量错误、确认记忆的来源契约、非法 PostgreSQL GUC、17 张新表的证明登记和多项测试契约。真实记忆查询完成，Judge 92；多 Agent 有最终报告和 7 条 Wiki 证据，Judge 80 / needs_review。**尚不构成整体业务验收通过或无人值守上线授权。**
+
+仅使用本机 `pi-native-demo` 合成资料、既有加密凭据和 `opencode/space-bunny-free`。未发送客户消息、修改商机、批准外部动作或发布用户 Agent 草稿。原[失败验收](system-acceptance-2026-10-03.md)保持原样，失败样本没有被改成通过。
+
+## 修复与反例
+
+| 问题 | 修复及实际证明 |
+| --- | --- |
+| 多 Agent 空答案、错误耗尽预算 | Pi 回调给累计用量，网关原来逐轮再累加。改为复制当前累计值；预算 300 的三轮 100/200/300 回归验证前两轮不停止、第三轮停止，同时核对入账值。临时恢复旧加法后恰好 1 项失败，已恢复修复 |
+| 确认记忆被当作不可信新增字段 | 正式工具说明与返回值一致：CRM 确认事实、版本、精确时间、确认标记、客户上下文权限；Mem0 仅排序，不产生公司政策。只把阻止当前任务的材料列入缺口，不把未来外联条件误当只读查询未完成 |
+| 字段断言用斜杠代替 null、编造事件 ID | 结果 schema/工具说明明确保持 JSON null、只用实际读取的 UUID，无事件 ID 时省略证据。确定性核验继续拒绝不匹配与未观察来源，没有放松 Eval 阈值 |
+| 日程写入触发非法配置名 | 新迁移 0408 替换两处函数的 `pi-native.cliente_pela_agenda` 为合法 `pi_native.cliente_pela_agenda`。历史迁移不改；保留组织过滤、事务锁、权限与匿名权限末尾清扫 |
+| 新 AI 表隔离证明缺失 | 13 张 service-only 表实际用两位不同组织 manager 的 JWT 及 anon 执行 SQL，要求权限错误；service_role 是正向控制。集成配置实际验证两向组织可见性及禁止写入；其他 3 表登记已有专用行为证明。临时给记忆表浏览器 SELECT 后恰好 1 项失败，已恢复 |
+| 隐私扫描漏掉记忆独立触发器 | 从实际 PG 函数体读取，并要求 contacts 上有效 BEFORE UPDATE/DELETE、正确字段及启用状态的 trigger。临时移除识别后恰好 2 项失败，已恢复；不增加隐私豁免 |
+| DNS、探针、provider、引用解析测试 | DNS 替身同时覆盖 named/default 导出；生产 SSRF guard 不变。health 隔离无关网络请求；空 key 在网络前拒绝，未知 provider 不被伪装。引用按文档所在目录解析，保留已跟踪证据检查 |
+| Meet 导出与时间前提 | SQL 支持的 `.is()` 补入测试替身；到期任务用已到期的 DB 时间种子，数据库时间断言不与宿主时钟混用；业务重试与不重复创建断言不变 |
+| 中文登录与 MFA | 公共布局与页面共用“已存偏好 → 浏览器语言 → 安装默认”解析。分别验证中文和葡语，错误提示排除 Next 路由播报器。认证 URL 按 pathname 匹配 `/app` 和子路由，不能把 `/login?next=/app` 当成功。语言修复撤回时恰好 1 项失败，已恢复 |
+| 新增凭据成功但列表看不到 | 实际浏览器请求 POST=201，第二次 GET 仍在等待。立即用服务器返回的脱敏行更新列表，取消旧读取避免覆盖，再照常重新读取验证状态；不把未确认写入伪装成成功。新增回归在重新读取永不完成时仍要求新卡片数据存在，且不得包含密钥。撤回缓存更新后恰好 1 项失败、3 项通过，恢复后 4 项通过 |
+| Wiki 生成预算风险 | 上游曾忽略 2 页配置而生成 11 页，因此移除虚假的上限，默认禁止缺失 fixture 时自动生成；必须显式批准未设硬上限的合成 ingest。CRM 检索仍使用 retrieve-only 凭据。硬预算及完整发布审批仍未验收 |
+
+## 同一真实任务的结果
+
+| 场景 | 原验收 | 第一轮修复 | 最后复验 |
+| --- | --- | --- | --- |
+| 客户已确认记忆 | partial，错当未核实嵌入字段；Judge 74 | 正确引用记忆，但错误列任务外缺口；Judge 89 | completed，1 次 CRM 读取、0 工具错误、无提案；Judge 92，总评 89 / needs_review |
+| 三位 specialist 商机复盘 | 没有最终答复；Judge 5 | 有最终报告，但引用/断言与推断仍有错误；Judge 62，确定性 fail | 有最终报告，13 次 CRM 工具、0 错误、3 位 specialist、71 条由工具事实提取的 claims、7 条 Wiki 证据；Judge 80，总评 79 / needs_review |
+
+最后记忆运行 `977a7a88-41c1-4219-ba1f-9ea4e20e0b1f`，多 Agent `bda3c380-2184-496c-94a6-8a9e40919ec8`。实际输入、最终答复、脱敏 tool calling、用量与 Eval 已录制：[记忆 JSON](fixtures/acceptance-fix-memory-2026-10-03.json)、[多 Agent JSON](fixtures/acceptance-fix-multi-2026-10-03.json)。JSON 的 tools/modelCalls 是父运行，Eval.summary 包含 specialists 的汇总，不能混用计数。没有导出 system prompt、隐藏推理、完整工具 body 或密钥。
+
+记忆最终答复正确列出林晓梅、下午三点沟通、先发书面说明再预约，明确只是客户偏好、不是公司政策。未来外联 consent 留作后续前置条件，不再阻止本次只读完成。总评仍待复核，因为自然语言声明不等于独立业务事实验证。
+
+多 Agent 明确发现演示 Wiki 不覆盖该商机的商业报价与阶段政策，保留材料缺失。真实 Judge 仍指出知识数量证据摘要被截断、specialist partial 未充分说明等；不通过补造政策、删掉缺口或提高评分来制造绿色结果。
+
+## 三服务与本机更新
+
+- Mem0：真实搜索命中，CRM `connected`、1 条确认记忆，未鉴权 401；使用 `infer:false` 已确认事实投影，不声称自动 LLM 记忆抽取已通过。
+- WeKnora：直接真实检索返回 4 条证据及哈希；Agent 最后查询返回 7 条可引用证据。数量随 query/limit 不同，不代表矛盾或新商业政策已存在。
+- Langfuse：记忆 trace `aef0b71b006f72c406df31ead4e22a2b`，9 observations、3 model、3 tool、7 scores，semantic=92、overall=89；多 Agent trace `f20bc82ffbdd3c35b054cffcc7210687`，36 observations、12 model、15 tool、9 scores，semantic=80、overall=79。均通过鉴权 API 实际回读，input/output 为空。包含结果提交和 Judge，不能当成 CRM 业务工具次数。
+- 遥测投递先排空积压并等待 Worker，初次未查到 trace 的失败保留。不能只凭 drain=done 判定落库；最终回读已证明新两条 trace 与分数主体一致。
+- 本机迁移前保留私有数据库备份；在事务内补齐 0400–0404 与 0408，退出 0。contacts=8、crm_leads=9、messages=0、workbench_runs=95、customer_memories=3，前后不变；3 张缺失表已建成，合法 GUC 函数已回读。备份含敏感数据，未提交 GitHub。
+- 最终生产构建已通过并重启 `http://localhost:3009`，静态录制演示 `3008` 不是这个真实后端。Docker VM 保持 4GB，没有清空卷或提高内存。
+
+## 最终门禁
+
+全量数据库最终复验已通过：266 个文件，2,229 项通过、1 项既有 expected fail、1 项既有 skip；升级带数据门禁通过。全量单测与浏览器门禁仍在最后复验。定向数据库 184 项、最终隔离/隐私/导出 27 项、语言/URL/fragment 等 48 项已通过。完整生产 build、typecheck、eslint（0 errors / 474 warnings）、渠道、role-rank、shell 已通过；凭据列表修复后的生产构建另行复验。
+
+第一次完整修复复验得到 unit 3 失败与 DB 1 超时：release fragment 缺标题已补；运行中修改结果契约使 runner 读到旧模块与新测试，已停止这种混合树验收；构建与门禁争抢外置硬盘时，DB 重放 baseline 超过 30 秒，错开后包含该用例的实际 DB 复验通过。它们不是被忽略的通过，最终整体统计以新一轮日志为准。
+
+## 未关闭的上线边界
+
+真实多 Agent 仍待业务复核；Judge 只消费有界摘要，长 observation 的全面覆盖仍需加强。预算是回合结束检查，修复累计误计数不等于任意单次 provider 调用都不会超出剩余额度；cache 与跨子运行聚合也需持续校核。Wiki 硬生成预算、派生发布人审、真实可逆写入及补偿、外部发送批准/拒绝/失败后恢复、备份恢复演练、VPS/多数据库版本矩阵均不能由本次只读样本替代。飞书按约定只保留接口，本轮不接入真实企业应用。

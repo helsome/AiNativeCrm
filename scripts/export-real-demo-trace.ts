@@ -12,7 +12,9 @@ async function main() {
   const id = z.string().uuid().parse(process.argv[2]);
   // A marker alone is not consent to publish arbitrary customer answers.
   // Public recordings require explicit curation and human review of stdout.
-  if (!["614417da-04ad-49c6-9d0c-d3a3572bb631", "b825d92a-ec59-42c6-9db9-aa66b0cc954c"].includes(id))
+  if (!["614417da-04ad-49c6-9d0c-d3a3572bb631", "b825d92a-ec59-42c6-9db9-aa66b0cc954c",
+    "77c6a3cd-0829-4c66-88d1-9d4781c159de", "aab97675-7364-4c1a-bded-4cbe3e580566",
+    "977a7a88-41c1-4219-ba1f-9ea4e20e0b1f", "bda3c380-2184-496c-94a6-8a9e40919ec8"].includes(id))
     throw new Error("curated_public_recording_required");
   const url = new URL(process.env.SUPABASE_DB_URL ?? "");
   if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) throw new Error("local_demo_only");
@@ -62,7 +64,7 @@ async function main() {
         },
       })),
       boundaries: { syntheticCustomer: true, credentialsIncluded: false, hiddenReasoningIncluded: false,
-        rawToolBodiesIncluded: false, mem0: "not_connected", weknora: "not_connected", langfuse: "not_connected" },
+        rawToolBodiesIncluded: false, mem0: "not_measured_by_export", weknora: "not_measured_by_export", langfuse: "not_measured_by_export" },
     }, null, 2));
   } finally { await pool.end(); }
 }

@@ -1,5 +1,7 @@
 # 本地真实 Agent 服务（内部联调）
 
+安全说明：`provision-local-wiki.ts` 默认只复用完整的现有合成 fixture。缺少模型/知识库/文档时会在远端请求之前拒绝；只有明确接受 `--allow-unbounded-synthetic-ingest` 的未设硬上限成本才能重新生成。已部署 WeKnora 曾忽略页数配置，因此不存在已验证的“最多 2 页”保证。该开关不是生产审批机制；CRM 使用 retrieve-only 密钥读取，不能自动生成或发布知识。
+
 这里运行真实的 Mem0、WeKnora 和 Langfuse，不是健康检查模拟器。配置只绑定合成演示组织 `pi-native-demo`，不得用于真实客户或无人值守生产。
 
 ## 服务与资源
