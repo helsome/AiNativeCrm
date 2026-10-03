@@ -75,6 +75,23 @@ interface Excecao {
  * linhas da OUTRA organização, não uma leitura como superusuário.
  */
 const PROVA_PROPRIA: readonly Excecao[] = [
+  { tabela: "ai_customer_memories", razao: "tests/invariants/ai-browser-boundaries.test.ts — actual SQL as both authenticated tenants and anon, with service-role positive control; integration settings have positive own-tenant and negative cross-tenant rows." },
+  { tabela: "ai_internal_event_inbox", razao: "tests/invariants/ai-browser-boundaries.test.ts — actual SQL as both authenticated tenants and anon, with service-role positive control; integration settings have positive own-tenant and negative cross-tenant rows." },
+  { tabela: "ai_internal_identity_challenges", razao: "tests/invariants/ai-browser-boundaries.test.ts — actual SQL as both authenticated tenants and anon, with service-role positive control; integration settings have positive own-tenant and negative cross-tenant rows." },
+  { tabela: "ai_internal_platform_tenants", razao: "tests/invariants/ai-browser-boundaries.test.ts — actual SQL as both authenticated tenants and anon, with service-role positive control; integration settings have positive own-tenant and negative cross-tenant rows." },
+  { tabela: "ai_internal_platform_users", razao: "tests/invariants/ai-browser-boundaries.test.ts — actual SQL as both authenticated tenants and anon, with service-role positive control; integration settings have positive own-tenant and negative cross-tenant rows." },
+  { tabela: "ai_internal_question_outbox", razao: "tests/invariants/ai-browser-boundaries.test.ts — actual SQL as both authenticated tenants and anon, with service-role positive control; integration settings have positive own-tenant and negative cross-tenant rows." },
+  { tabela: "ai_mission_commands", razao: "tests/invariants/ai-browser-boundaries.test.ts — actual SQL as both authenticated tenants and anon, with service-role positive control; integration settings have positive own-tenant and negative cross-tenant rows." },
+  { tabela: "ai_mission_explicit_offers", razao: "tests/invariants/ai-browser-boundaries.test.ts — actual SQL as both authenticated tenants and anon, with service-role positive control; integration settings have positive own-tenant and negative cross-tenant rows." },
+  { tabela: "ai_mission_internal_inputs", razao: "tests/invariants/ai-browser-boundaries.test.ts — actual SQL as both authenticated tenants and anon, with service-role positive control; integration settings have positive own-tenant and negative cross-tenant rows." },
+  { tabela: "ai_mission_internal_threads", razao: "tests/invariants/ai-browser-boundaries.test.ts — actual SQL as both authenticated tenants and anon, with service-role positive control; integration settings have positive own-tenant and negative cross-tenant rows." },
+  { tabela: "ai_mission_wakes", razao: "tests/invariants/ai-browser-boundaries.test.ts — actual SQL as both authenticated tenants and anon, with service-role positive control; integration settings have positive own-tenant and negative cross-tenant rows." },
+  { tabela: "ai_wiki_evidence", razao: "tests/invariants/ai-browser-boundaries.test.ts — actual SQL as both authenticated tenants and anon, with service-role positive control; integration settings have positive own-tenant and negative cross-tenant rows." },
+  { tabela: "ai_workbench_send_decision_receipts", razao: "tests/invariants/ai-browser-boundaries.test.ts — actual SQL as both authenticated tenants and anon, with service-role positive control; integration settings have positive own-tenant and negative cross-tenant rows." },
+  { tabela: "ai_integration_settings", razao: "tests/invariants/ai-browser-boundaries.test.ts — actual SQL as both authenticated tenants and anon, with service-role positive control; integration settings have positive own-tenant and negative cross-tenant rows." },
+  { tabela: "ai_agent_eval_reports", razao: "tests/invariants/duoagent-runtime.test.ts — seeded evaluations in two tenants; real authenticated manager JWT reads own rows and zero foreign rows, client writes denied." },
+  { tabela: "ai_missions", razao: "tests/invariants/ai-missions.test.ts — two real tenants, manager JWT reads own mission and zero foreign missions, client writes denied and composite foreign keys reject cross-org links." },
+  { tabela: "ai_mission_events", razao: "tests/invariants/ai-missions.test.ts — manager JWT reads actual own mission transitions and zero foreign transitions, client insert denied." },
   {
     tabela: "ai_agent_action_proposals",
     razao:

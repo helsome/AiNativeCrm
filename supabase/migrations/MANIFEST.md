@@ -424,3 +424,4 @@ To re-apply on a fresh Supabase project, replay the migrations in version order 
 | `20261002031000` | `0406_ai_customer_memories` | Customer-only confirmed facts, projection ledger, privacy tombstones and durable Mem0 reconciliation. |
 
 | `20261002032000` | `0407_ai_wiki_evidence` | Immutable current Wiki snapshots with source-version manifest and per-organization ownership. |
+| `20261003010000` | `0408_cliente_agenda_guc_valido` | Forward fix: legal pi_native custom GUC restores appointment-derived customer recognition and its protected-column trigger without modifying historical migrations or data. |

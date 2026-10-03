@@ -31,7 +31,10 @@ import { TAG_DE_CLIENTE } from "@/lib/contacts/cliente";
  * O teste lê o ARQUIVO, e não o banco, de propósito: assim ele roda em
  * `test:unit` (sem Postgres) e reprova o PR que muda um lado só.
  */
-const MIGRATION = join(process.cwd(), "supabase/migrations/20260915180000_0262_cliente_pela_agenda.sql");
+const MIGRATION = join(
+  process.cwd(),
+  "supabase/migrations/20260915180000_0262_cliente_pela_agenda.sql",
+);
 const BASELINE = join(process.cwd(), "supabase/baseline.sql");
 
 const CONSTANTE = /c_etiqueta constant text := '([^']+)'/g;
@@ -68,14 +71,25 @@ describe("a etiqueta de cliente", () => {
     // HORA e que recusa a escrita de sessão nas três colunas. Migration que só
     // entra em `migrations/` não chega a quem instalou pelo kit — e aqui a
     // ausência não dá erro nenhum, só devolve o comportamento antigo.
-    expect(baseline).toContain("create or replace function public.fn_colunas_de_cliente_sao_do_sistema()");
+    expect(baseline).toContain(
+      "create or replace function public.fn_colunas_de_cliente_sao_do_sistema()",
+    );
     expect(baseline).toContain("create trigger trg_contato_colunas_de_cliente");
     expect(baseline).toContain("colunas_de_cliente_sao_do_sistema' using errcode = '42501'");
     // O anúncio da escrita do sistema. Sem ele a guarda barra o próprio trigger
     // e marcar um horário passa a dar 42501 — o pior desfecho possível, porque
     // o `update.sh` do clone aplicaria a guarda sem o anúncio.
-    expect(baseline).toContain("set_config('pi-native.cliente_pela_agenda', 'on', true)");
+    const forwardFix = baseline.slice(
+      baseline.indexOf("-- ---- PostgreSQL legal customer scheduling GUC"),
+    );
+    expect(forwardFix).toContain("set_config('pi_native.cliente_pela_agenda', 'on', true)");
+    expect(forwardFix).not.toContain("pi-native.cliente_pela_agenda");
     const constantesDoBaseline = [...baseline.matchAll(CONSTANTE)].map((m) => m[1]);
-    expect(constantesDoBaseline).toEqual([TAG_DE_CLIENTE, TAG_DE_CLIENTE]);
+    // Two historical declarations plus two replacement bodies in forward fix 0408.
+    expect(constantesDoBaseline).toEqual(Array(4).fill(TAG_DE_CLIENTE));
+    expect([...forwardFix.matchAll(CONSTANTE)].map((m) => m[1])).toEqual([
+      TAG_DE_CLIENTE,
+      TAG_DE_CLIENTE,
+    ]);
   });
 });

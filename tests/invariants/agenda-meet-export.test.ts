@@ -48,6 +48,10 @@ class ReadQuery {
     this.filters.push(`${field(key)}=${this.parameter(value)}`);
     return this;
   }
+  is(key: string, value: null | boolean) {
+    this.filters.push(`${field(key)} is ${value === null ? "null" : value ? "true" : "false"}`);
+    return this;
+  }
   in(key: string, values: unknown[]) {
     this.filters.push(`${field(key)}=any(${this.parameter(values)})`);
     return this;

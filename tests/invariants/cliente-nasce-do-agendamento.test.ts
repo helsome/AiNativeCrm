@@ -460,7 +460,10 @@ describe("ligada — a transição", () => {
 
     const depois = await lerContato(contato);
     expect(depois.first_service_at?.toISOString()).toBe(criado.toISOString());
-    expect(depois.first_service_at!.getTime()).toBeLessThanOrEqual(Date.now());
+    // Both timestamps are owned by PostgreSQL. A Docker VM may be a few
+    // milliseconds ahead of Node; that does not make a recognized date future.
+    const databaseNow = (await pool.query<{ agora: Date }>("select clock_timestamp() as agora")).rows[0]!.agora;
+    expect(depois.first_service_at!.getTime()).toBeLessThanOrEqual(databaseNow.getTime());
     expect(depois.tags).toContain(TAG_DE_CLIENTE);
   });
 

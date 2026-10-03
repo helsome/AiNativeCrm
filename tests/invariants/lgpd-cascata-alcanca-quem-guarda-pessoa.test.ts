@@ -117,6 +117,23 @@ function tabelasNaCascata(): string[] {
      where p.proname = 'fn_lgpd_cascade_redact_contact'
         or (
           p.pronamespace = 'public'::regnamespace
+          and p.proname = 'fn_ai_customer_memory_privacy'
+          and exists (
+            select 1 from pg_trigger t
+             where t.tgfoid = p.oid
+               and t.tgrelid = 'public.contacts'::regclass
+               and t.tgname = 'trg_ai_customer_memory_privacy'
+               and not t.tgisinternal
+               and t.tgenabled in ('O', 'A')
+               and t.tgtype = 27 -- BEFORE UPDATE OR DELETE FOR EACH ROW
+               and (select attnum from pg_attribute
+                     where attrelid=t.tgrelid and attname='is_anonymized') = any(t.tgattr)
+               and (select attnum from pg_attribute
+                     where attrelid=t.tgrelid and attname='is_merged_into') = any(t.tgattr)
+          )
+        )
+        or (
+          p.pronamespace = 'public'::regnamespace
           and p.proname = 'fn_reply_redact'
           and exists (
             select 1 from pg_trigger t
@@ -156,6 +173,9 @@ describe("LGPD: a cascata alcança toda tabela que guarda dado de pessoa", () =>
 
   it("CONTROLE: o redator0227 ativo alcança ai_reply_drafts pelo corpo instalado", () => {
     expect(tabelasNaCascata()).toContain("ai_reply_drafts");
+  });
+  it("CONTROLE: o trigger de privacidade ativo alcança a memória pelo corpo instalado", () => {
+    expect(tabelasNaCascata()).toContain("ai_customer_memories");
   });
 
   it("nenhuma tabela NOVA guarda dado de pessoa fora da cascata", () => {
