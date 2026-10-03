@@ -94,6 +94,14 @@ export function AddCredentialDialog({ open, onOpenChange }: Props) {
         "/api/v1/ai/credentials",
         parsed.data,
       );
+      // Use the server-confirmed safe row immediately. Waiting for a second GET
+      // left a successful save invisible while that request was still pending.
+      // Cancel an older list read so it cannot overwrite the confirmed row.
+      await qc.cancelQueries({ queryKey: credentialsListQueryKey });
+      qc.setQueryData<CredentialRow[]>(credentialsListQueryKey, (previous = []) => [
+        res.data,
+        ...previous.filter((row) => row.id !== res.data.id),
+      ]);
       toast.dismiss(validatingToast);
       toast.success(t("Credencial salva. Validação em segundo plano."));
       reset();
