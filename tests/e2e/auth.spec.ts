@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import { isAppUrl } from "./utils/app-url";
 
 test.describe("auth flow", () => {
   test("anon GET /app/inbox redirects to /login", async ({ page }) => {
@@ -17,7 +18,7 @@ test.describe("auth flow", () => {
     await expect(
       page.getByRole("alert").filter({ hasText: "Email ou senha incorretos." }),
     ).toBeVisible();
-    expect(page.url()).not.toMatch(/\/app\//);
+    expect(isAppUrl(new URL(page.url()))).toBe(false);
   });
 
   test("login form is keyboard navigable in tab order", async ({ page }) => {
@@ -50,6 +51,6 @@ test.describe("Chinese login contract", () => {
     await page.locator("#password").fill("wrong-password-xyz");
     await page.getByRole("button", { name: "登录", exact: true }).click();
     await expect(page.getByRole("alert").filter({ hasText: "邮箱或密码错误" })).toBeVisible();
-    expect(page.url()).not.toMatch(/\/app\//);
+    expect(isAppUrl(new URL(page.url()))).toBe(false);
   });
 });
