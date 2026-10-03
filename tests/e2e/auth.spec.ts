@@ -14,8 +14,7 @@ test.describe("auth flow", () => {
     await page.locator("#email").fill("nobody@example.com");
     await page.locator("#password").fill("wrong-password-xyz");
     await page.getByRole("button", { name: /entrar/i }).click();
-    // Wait for either an inline error or that we did NOT navigate to /app
-    await page.waitForTimeout(1500);
+    await expect(page.getByRole("alert")).toBeVisible();
     expect(page.url()).not.toMatch(/\/app\//);
   });
 
@@ -38,5 +37,17 @@ test.describe("auth flow", () => {
       ["serious", "critical"].includes(v.impact ?? ""),
     );
     expect(blocking, JSON.stringify(blocking, null, 2)).toEqual([]);
+  });
+});
+
+test.describe("Chinese login contract", () => {
+  test.use({ locale: "zh-CN" });
+  test("default Chinese form reports invalid credentials without navigation", async ({ page }) => {
+    await page.goto("/login");
+    await page.locator("#email").fill("nobody@example.com");
+    await page.locator("#password").fill("wrong-password-xyz");
+    await page.getByRole("button", { name: "登录", exact: true }).click();
+    await expect(page.getByRole("alert")).toContainText("邮箱或密码错误");
+    expect(page.url()).not.toMatch(/\/app\//);
   });
 });

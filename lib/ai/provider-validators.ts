@@ -264,19 +264,25 @@ export async function validateOpenCodeKey(apiKey: string): Promise<ValidationRes
 }
 
 export function validateProviderKey(provider: Provider, apiKey: string): Promise<ValidationResult> {
+  // Check registration BEFORE the credential guard: unknown providers must not
+  // be disguised as an empty-key error. Empty BYOK never makes a network call.
+  const validate = (validator: (key: string) => Promise<ValidationResult>) =>
+    apiKey.trim()
+      ? validator(apiKey)
+      : Promise.resolve<ValidationResult>({ ok: false, error: "auth_failed_401" });
   switch (provider) {
     case "anthropic":
-      return validateAnthropicKey(apiKey);
+      return validate(validateAnthropicKey);
     case "openai":
-      return validateOpenAIKey(apiKey);
+      return validate(validateOpenAIKey);
     case "google":
-      return validateGoogleKey(apiKey);
+      return validate(validateGoogleKey);
     case "openrouter":
-      return validateOpenRouterKey(apiKey);
+      return validate(validateOpenRouterKey);
     case "opencode":
-      return validateOpenCodeKey(apiKey);
+      return validate(validateOpenCodeKey);
     case "deepseek":
-      return validateDeepSeekKey(apiKey);
+      return validate(validateDeepSeekKey);
     default: {
       // Sem `never` aqui: `Provider` agora é derivado de PROVEDORES, e a lista
       // cresce sem que este arquivo saiba. Provedor novo cadastrado antes de

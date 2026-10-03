@@ -22,12 +22,9 @@ vi.stubGlobal("fetch", fetchMock);
 
 // O caso público mede que o guard chama o transporte depois de resolver o
 // hostname; não deve depender do DNS da máquina ou de uma rede externa.
-vi.mock("node:dns/promises", async (importOriginal) => {
-  const original = await importOriginal<typeof import("node:dns/promises")>();
-  return {
-    ...original,
-    lookup: vi.fn(async () => [{ address: "93.184.216.34" }]),
-  };
+vi.mock("node:dns/promises", () => {
+  const lookup = vi.fn(async () => [{ address: "93.184.216.34", family: 4 }]);
+  return { lookup, default: { lookup } };
 });
 
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({}) }));
@@ -65,7 +62,10 @@ function respondeOk(status = 200) {
 
 const ultimaChamada = () => ({
   url: String(fetchMock.mock.calls.at(-1)?.[0] ?? ""),
-  init: (fetchMock.mock.calls.at(-1)?.[1] ?? {}) as { headers?: Record<string, string>; body?: string },
+  init: (fetchMock.mock.calls.at(-1)?.[1] ?? {}) as {
+    headers?: Record<string, string>;
+    body?: string;
+  },
 });
 const corpo = () => JSON.parse(ultimaChamada().init.body ?? "{}") as Record<string, unknown>;
 
