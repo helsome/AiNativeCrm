@@ -92,6 +92,9 @@ export function varrer(nomeDoArquivo: string, sql: string): Indice[] {
   return declaracoes(sql).flatMap(({ texto, linha }) => {
     const n = normalizar(texto);
     if (!/\bon public\.contacts\b/.test(n)) return [];
+    // Structural composite FK target, not a natural customer identity.
+    // PostgreSQL requires an unconditional unique key for this reference.
+    if (/\bon public\.contacts\s*(?:using btree\s*)?\((?:id\s*,\s*organization_id|organization_id\s*,\s*id)\)\s*;$/.test(n)) return [];
     return [
       {
         arquivo: nomeDoArquivo,
@@ -147,6 +150,7 @@ describe("índice único de identidade em public.contacts", () => {
     expect(varrer("despejo.sql", despejo).map((i) => i.ignoraMesclado)).toEqual([true]);
 
     expect(varrer("prosa.sql", `-- ${defeito}`)).toEqual([]);
+    expect(varrer("foreign-key-target.sql", "create unique index contacts_scope on public.contacts (id, organization_id);")).toEqual([]);
     expect(varrer("outro_alvo.sql", "create unique index if not exists x on public.contacts_arquivo (organization_id);")).toEqual(
       [],
     );

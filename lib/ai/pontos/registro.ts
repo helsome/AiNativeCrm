@@ -481,6 +481,16 @@ export const PONTOS_DE_IA: readonly PontoDeIa[] = [
 
   // ────────────────────────── Melhorar e testar ────────────────────────────
   {
+    id: "mission_customer_acceptance_judge",
+    rotulo: "复核客户答复是否支持验收条件",
+    oQueFaz: "独立读取已验证来源的客户入站引用，识别明确接受、含糊或冲突；不替代渠道证据或业务验收。",
+    papel: "melhorar",
+    exige: { tools: true },
+    emissor: "lib/ai/evals/mission-customer-acceptance.ts",
+    sintomaDeFalha: "客户回复的语义验收保持待核对，不得由 Agent 自述代替。",
+    registraEm: "llm_calls",
+  },
+  {
     id: "workbench_eval_judge",
     rotulo: "复核 Agent 运行质量",
     oQueFaz:

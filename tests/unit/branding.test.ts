@@ -243,6 +243,11 @@ type EntradaDeMarca = {
 };
 
 const MARCA_CONGELADA: Record<string, EntradaDeMarca> = {
+  "lib/ai/internal-collaboration/inbox-crypto.ts": {
+    categoria: "PROTOCOLO",
+    motivo: "稳定加密域分离标签，是数据库密文的协议标识；重命名会使已落库的飞书入站消息与出站问题无法解密，不是用户界面品牌。",
+    marcas: ["pi-native-crm"],
+  },
   // ─── PROTOCOLO — contrato de fio. Renomear quebra integração alheia. ───
   "app/api/v1/webhooks/in/[token]/route.ts": {
     categoria: "PROTOCOLO",
@@ -849,6 +854,10 @@ type CategoriaDeHost =
 type EntradaDeHost = { categoria: CategoriaDeHost; motivo: string };
 
 const HOSTS_DECLARADOS: Record<string, EntradaDeHost> = {
+  "open.feishu.cn": {
+    categoria: "FORNECEDOR",
+    motivo: "飞书官方 token 与 IM API 目的地；仅在真实服务端应用配置后调用，不是部署者个人域名。",
+  },
   // ── prospecção (PR #963): destino de chamada do crawler ──
   "api.apify.com": {
     categoria: "FORNECEDOR",

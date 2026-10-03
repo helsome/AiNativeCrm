@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { randomId } from "@/lib/random-id";
 
 type Command = "pause_customer_send" | "resume_customer_send";
 export function MissionSendControl({
@@ -27,7 +28,7 @@ export function MissionSendControl({
       pending.current.command !== command ||
       pending.current.reason !== reason.trim()
     )
-      pending.current = { command, reason: reason.trim(), requestKey: crypto.randomUUID() };
+      pending.current = { command, reason: reason.trim(), requestKey: randomId() };
     try {
       const response = await fetch(`/api/v1/ai/missions/${mission.id}/commands`, {
         method: "POST",

@@ -51,8 +51,8 @@ vi.mock("@/lib/agent-engine/edge/crm/mcp-tools", () => ({
   }),
 }));
 
-import { runResumedWorkbenchTurn } from "./run-resumed-workbench-turn";
-import { MissionDirectionFenceError } from "./mission-direction-fence";
+import { runResumedWorkbenchTurn } from "@/lib/ai/agents/run-resumed-workbench-turn";
+import { MissionDirectionFenceError } from "@/lib/ai/agents/mission-direction-fence";
 
 describe("resumed workbench turn", () => {
   it("delivers the current memory revision to real Pi after JSON restore and persists that same context", async () => {

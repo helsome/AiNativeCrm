@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { randomId } from "@/lib/random-id";
 
 type Memory = {
   id: string;
@@ -79,7 +80,7 @@ export function CustomerMemoryPanel({
           className="flex flex-wrap gap-2"
           onSubmit={(event) => {
             event.preventDefault();
-            requestKey.current ??= crypto.randomUUID();
+            requestKey.current ??= randomId();
             void mutate("POST", {
               contact_id: contactId,
               request_key: requestKey.current,
@@ -114,7 +115,7 @@ export function CustomerMemoryPanel({
               requestKey.current = null;
             }}
           />
-          <Button disabled={busy || !body.trim()}>确认并保存</Button>
+          <Button type="submit" disabled={busy || !body.trim()}>确认并保存</Button>
         </form>
       )}
       {rows.map((row) => (

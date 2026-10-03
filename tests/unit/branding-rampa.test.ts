@@ -111,7 +111,8 @@ describe("rampaDeSemente — catraca de calibração contra o design system", ()
     // por não ter o que comparar — instrumento morto tem cara de teste verde.
     expect(esperados).toHaveLength(11);
     expect(new Set(esperados).size).toBe(11);
-    expect(esperados[K]).toBe("#934531");
+    // Current neutral design system, not the superseded terracotta palette.
+    expect(esperados[K]).toBe("#1d1d1f");
   });
 
   it("usar explicitamente a cor do produto conserva os 11 stops literais", () => {

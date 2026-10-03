@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { randomId } from "@/lib/random-id";
 
 type Provider = {
   provider: string;
@@ -79,7 +80,7 @@ export function AgentIntegrationsPanel({
     setBusy(true);
     setError("");
     try {
-      wikiKey.current ??= crypto.randomUUID();
+      wikiKey.current ??= randomId();
       const response = await fetch("/api/v1/ai/integrations/wiki/sources", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -219,6 +220,7 @@ export function AgentIntegrationsPanel({
             确认整个知识库均可供本组织使用，不含不同权限的混合材料
           </label>
           <Button
+            type="submit"
             disabled={
               !canManageIntegrations ||
               busy ||

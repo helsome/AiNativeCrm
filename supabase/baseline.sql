@@ -36489,7 +36489,7 @@ alter table public.ai_agent_run_events add constraint ai_agent_run_events_event_
  'run_started','context_loaded','model_decision','tool_proposed','policy_checked','tool_started','tool_completed',
  'crm_state_changed','human_confirmation_requested','human_confirmation_received','run_resumed','run_completed',
  'run_partial','run_failed','run_cancelled','usage_reported','collaboration_started','specialist_started',
- 'specialist_completed','specialist_failed','collaboration_conflict','collaboration_completed'
+ 'specialist_completed','specialist_failed','collaboration_conflict','collaboration_completed','manager_direction_consumed'
 ));
 
 alter table public.llm_calls add column if not exists workbench_run_id uuid;
@@ -37474,17 +37474,8 @@ alter table public.ai_mission_internal_inputs
 create unique index if not exists ai_mission_internal_inputs_direction_revision_uidx
   on public.ai_mission_internal_inputs(organization_id,mission_id,direction_revision)
   where kind='manager_direction' and direction_revision is not null;
-alter table public.ai_agent_run_events
-  drop constraint if exists ai_agent_run_events_event_type_check;
-alter table public.ai_agent_run_events
-  add constraint ai_agent_run_events_event_type_check check (event_type in (
-    'run_started','context_loaded','model_decision','tool_proposed','policy_checked',
-    'tool_started','tool_completed','crm_state_changed','human_confirmation_requested',
-    'human_confirmation_received','run_resumed','run_completed','run_partial',
-    'run_failed','run_cancelled','usage_reported','collaboration_started',
-    'specialist_started','specialist_completed','specialist_failed',
-    'collaboration_conflict','collaboration_completed','manager_direction_consumed'
-  ));
+-- 0399 event vocabulary is consolidated in the single 0307 constraint block
+-- above. Rebuilding the older vocabulary on update would reject live rows.
 notify pgrst, 'reload schema';
 
 -- 0400 — private idempotency receipt for post-approval Pi continuation.
