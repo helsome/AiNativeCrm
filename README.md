@@ -22,7 +22,7 @@
 ### 评审分支验证中，尚未合入主分支
 
 - 已修复第三方 Memory 未配置时 CRM 人工确认记忆被隐藏的问题：SQL 保持事实源，Mem0 仅用于可选排序。独立记忆覆盖评测能识别漏读，已保存的语义评审可只读回放。
-- 已提交[真实模型修复前后记录](docs/testing/agent-services-real-run-2026-10-03.md)和[脱敏录制](docs/testing/fixtures/agent-services-real-2026-10-03.json)。修复后真实 Judge 为 92 分，但总评仍待复核；Mem0、WeKnora、Langfuse 服务端尚未真实连接。
+- 已提交[真实模型修复前后记录](docs/testing/agent-services-real-run-2026-10-03.md)和[脱敏录制](docs/testing/fixtures/agent-services-real-2026-10-03.json)。原录制的真实 Judge 为 92 分，但总评仍待复核；后续[本地三服务联调](docs/testing/local-agent-services-connected-2026-10-03.md)已验证 Mem0 真实检索/删除、WeKnora 生成与 CRM 引用、Langfuse Trace/Eval 落库回读。最新只读运行引用 4 条 Wiki 证据，真实 Judge 86 分、总评 81 分待复核，不代表业务已完整验收。
 - 商机持续任务、结构化结果提交、证据核验、跨运行预算与取消保护已有本地实现和定向测试；尚未完成完整业务验收。
 - 负责人可在任务等待复核、客户回复或动作审批时补充方向，并使待审旧提案与草稿失效。自动商机写入已有方向版本保护，但运行中即时转向、模型消费确认与完整恢复链路尚未闭环。
 - 飞书内部协作的身份映射、一次性成员绑定、消息队列和回复后续跑已有本地实现与定向测试；应用安装与真实飞书租户端到端验证尚未完成。
