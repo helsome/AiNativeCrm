@@ -179,6 +179,7 @@ export interface AgentTurnInput {
   shouldStopAfterTurn?: (input: {
     message: RuntimeMessage;
     turn: number;
+    /** Cumulative usage since this run() call began, NOT a per-turn delta. */
     usage: RuntimeUsage;
   }) => boolean | Promise<boolean>;
   steering?: {
