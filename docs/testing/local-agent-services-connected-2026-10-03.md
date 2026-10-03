@@ -64,3 +64,16 @@ Agent 把外联同意/审批缺失也列为缺失材料，故终态仍为 `parti
 Docker VM 保持 4GB，没有清空 Supabase 或增加虚拟机内存。观测时新增服务约 2.52GB、VM available 367MB，当前四个目标进程均 `OOMKilled=false`。内存余量很小，不适合同时执行重型构建与大量并发任务；可暂停可观测性栈再恢复专用投递。
 
 部署/重启说明见[本地服务运行手册](../../infra/local-agent-services/README.md)。凭据、私有 env、数据库卷和隐藏推理未提交。
+
+## 代码验证结果
+
+- `pnpm build`、`pnpm typecheck`、`pnpm lint`、`pnpm lint:channels`、`pnpm test:shell` 和 release fragment 检查通过。全量 lint 保留 475 条既有 warning、0 error；channel 检查报告 62 项已登记债务，没有新增项。
+- 本次 API/集成相关定向测试 28 项通过；最终 API/本地服务配置检查 6 项通过。
+- 按贡献指南做修复敏感性验证：在已提交修复后临时移除知识源字段赋值，两条选择/清空测试均失败、原测试通过；恢复原行后 6 项检查全部通过。源码已恢复到提交内容。
+- **全量单测未通过**：1320 个文件中 1313 通过、7 失败；12879 个测试通过、13 失败、1 expected fail、1 skipped，耗时 926.27 秒。不能将本次交付标为全量 CI 绿色。
+- 失败分布：邮件/SMTP 页面、Inbox 摘要、provider validator 共 10 项 30 秒超时；health 的小于 2 秒断言测得 3067ms；外部 DB DNS 和 Zernio 公网 URL 两项安全断言失败。本机额外实测 `db.invalid` 被解析为 `198.18.0.58`，而不是 DNS 失败，说明本地代理 DNS 改变了该测试前提。没有为通过测试放宽生产安全限制，也没有改动这些关联模块；其他超时尚未逐项修复。
+- 本次浏览器实测 CRM 运行详情与 Langfuse Scores，不宣称执行了完整 Playwright 套件；本次未修改数据库 schema，未重新运行数据库不变量套件。
+
+真实 Langfuse 调用树与评分截图：
+
+![本地真实 Trace 与 8 项评分](screenshots/local-langfuse-trace-eval-2026-10-03.png)
