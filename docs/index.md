@@ -194,3 +194,4 @@ anterior à v1.0.0; regenere (`/graphify .`) antes de confiar em detalhe fino.
 
 - [Mem0 customer memory, WeKnora company Wiki, Langfuse trace/Eval adapters](integrations/agent-services.md)
 - [Adapter verification and unmeasured deployment gates](testing/agent-services-2026-10-02.md)
+- [系统全面验收：真实模型、多 Agent、Memory/Wiki/Langfuse 与失败门禁](testing/system-acceptance-2026-10-03.md)
