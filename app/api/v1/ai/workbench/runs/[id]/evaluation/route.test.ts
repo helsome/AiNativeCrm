@@ -60,6 +60,7 @@ function stub(failure?: string, corruptChild = false, missingState = false) {
         return builder;
       },
       order: () => builder,
+      limit: () => builder,
       maybeSingle: () => Promise.resolve(response()),
       then: (resolve: (value: unknown) => unknown) => Promise.resolve(response()).then(resolve),
     };
@@ -139,6 +140,12 @@ describe("real evaluation material is required", () => {
     });
     expect(response.status).toBe(409);
     expect(mocks.evaluate).not.toHaveBeenCalled();
+  });
+  it("fails visibly when persisted review storage cannot be read and never invokes a judge", async () => {
+    stub("ai_agent_eval_reports");
+    const response = await GET(new NextRequest(`http://localhost/runs/${id}/evaluation`), { params: Promise.resolve({ id }) });
+    expect(response.status).toBe(503);
+    expect(mocks.evaluate.mock.calls[0]?.[0]).not.toHaveProperty("judge");
   });
   it("computes the report from successfully loaded root and specialist material", async () => {
     stub();

@@ -1,4 +1,3 @@
-import { integrationBinding } from "@/lib/ai/integrations/config";
 import { readConfirmedCustomerMemory } from "@/lib/ai/integrations/mem0";
 import { getRequestPool } from "@/lib/agent-engine/db/request-pool";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -110,10 +109,8 @@ export async function loadCustomerMemoryForConversation(
       : query.eq("demanda_revision", boundary.demanda_revision);
   const { data, error } = await query.order("seq", { ascending: false }).limit(1).maybeSingle();
   if (error) throw new Error("customer_memory_read_failed", { cause: error });
-  const externalMemory = integrationBinding(organizationId, "mem0")
-    ? await readConfirmedCustomerMemory(getRequestPool(), organizationId, boundary.contact_id)
-        .catch(() => ({ status: "unavailable", memories: [] }))
-    : undefined;
+  const externalMemory = await (async () => readConfirmedCustomerMemory(getRequestPool(), organizationId, boundary.contact_id))()
+    .catch(() => ({ status: "unavailable", coverage: "unavailable", memories: [] }));
   const current = await readServiceBoundarySupabase(db, organizationId, conversationId);
   if (!current || !sameBoundary(boundary, current))
     return {

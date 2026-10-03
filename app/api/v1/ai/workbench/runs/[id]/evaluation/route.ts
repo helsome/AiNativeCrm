@@ -16,6 +16,7 @@ import { parseRuntimeMessages } from "@/lib/ai/agents/workbench-state";
 import type { AgentEvalReport, AgentEvalRunInput } from "@/lib/ai/evals/contracts";
 import { resolveAgentEvalProfile } from "@/lib/ai/evals/profiles";
 import { runAgentEvaluation } from "@/lib/ai/evals/run-evaluation";
+import { matchingSavedSemanticReview } from "@/lib/ai/evals/saved-semantic-review";
 import {
   LlmAgentSemanticJudge,
   WORKBENCH_SEMANTIC_RUBRIC_REVISION,
@@ -62,7 +63,7 @@ async function loadEvaluationMaterial(
 ): Promise<EvaluationMaterial> {
   const { data: run, error: runError } = await admin
     .from("ai_workbench_runs")
-    .select("id, agent_id, task, mode, status, final_text, result_document, updated_at, runtime_state")
+    .select("id, agent_id, task, mode, status, final_text, result_document, created_at, started_at, updated_at, runtime_state")
     .eq("organization_id", organizationId)
     .eq("id", runId)
     .maybeSingle();
@@ -146,6 +147,39 @@ async function loadEvaluationMaterial(
     ...(parsedRootMessages ?? []),
     ...(childStates ?? []).flatMap((child) => parseRuntimeMessages(child.messages) ?? []),
   ];
+  const contactIds = [...new Set(runtimeMessages.flatMap(message => {
+    if (message.role !== "tool" || message.toolName !== "crm_get_contact" || message.isError) return [];
+    try {
+      const text = typeof message.content === "string" ? message.content : message.content
+        .filter(part => part.type === "text").map(part => part.text).join("\n");
+      const value = message.details ?? JSON.parse(text);
+      return typeof value?.id === "string" && UUID_RX.test(value.id) ? [value.id as string] : [];
+    } catch { return []; }
+  }))];
+  if (contactIds.length > 50)
+    throw new EvaluationMaterialError("read_failed", "记忆覆盖校验超出安全读取上限。");
+  let confirmedMemoryExpectations: AgentEvalRunInput["confirmedMemoryExpectations"] = [];
+  if (contactIds.length) {
+    // Only facts present throughout this run count. Later additions/deletions
+    // cannot manufacture a historical failure. Current privacy always wins.
+    const contacts = await admin.from("contacts").select("id")
+      .eq("organization_id", organizationId).in("id", contactIds)
+      .eq("is_anonymized", false).is("is_merged_into", null);
+    if (contacts.error) throw new EvaluationMaterialError("read_failed", "无法独立校验客户记忆作用域。");
+    const allowed = (contacts.data ?? []).map(contact => contact.id);
+    if (allowed.length) {
+      const memories = await admin.from("ai_customer_memories").select("id, contact_id")
+        .eq("organization_id", organizationId).in("contact_id", allowed)
+        .lte("created_at", run.started_at ?? run.created_at)
+        .or(`deleted_at.is.null,deleted_at.gt.${run.updated_at}`).limit(1001);
+      if (memories.error || (memories.data?.length ?? 0) > 1000)
+        throw new EvaluationMaterialError("read_failed", "确认记忆存在性读取不完整。");
+      confirmedMemoryExpectations = allowed.map(contactId => ({ contactId,
+        memoryIds: (memories.data ?? []).filter(memory => memory.contact_id === contactId).map(memory => memory.id),
+        asOf: run.started_at ?? run.created_at,
+      }));
+    }
+  }
   const parentEvents = (events ?? []).map((event) => ({
     id: event.id,
     sequence: event.sequence,
@@ -183,6 +217,7 @@ async function loadEvaluationMaterial(
       status: proposal.status,
     })),
     runtimeMessages,
+    confirmedMemoryExpectations,
     collaborationRuns: (collaborationRuns ?? []).map((child) => ({
       id: child.id,
       specialistKey: child.specialist_key,
@@ -206,6 +241,7 @@ async function loadEvaluationMaterial(
         proposals,
         collaborationRuns,
         runtimeMessages,
+        confirmedMemoryExpectations,
         profile: { key: profile.key, revision: profile.revision },
       }),
     )
@@ -261,7 +297,7 @@ function materialFailure(error: unknown, requestId: string): Response {
   return fail("internal_error", "无法准备运行评测。", 500, { requestId });
 }
 
-/** Read-only deterministic evaluation; it never spends model tokens. */
+/** Read-only deterministic evaluation plus matching saved semantic review; no model calls. */
 export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
   const requestId = randomUUID();
   const { id } = await ctx.params;
@@ -277,7 +313,16 @@ export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
   }
   const report = await runAgentEvaluation({ run: material.input, profile: material.profile });
   const inputFingerprint = evaluationFingerprint(material.baseFingerprint, "deterministic");
-  return ok({ ...report, inputFingerprint }, { requestId });
+  const saved = await admin.from("ai_agent_eval_reports").select("report, input_fingerprint")
+    .eq("organization_id", authz.org.orgId).eq("run_id", id)
+    .eq("profile_key", material.profile.key).eq("profile_revision", material.profile.revision)
+    .order("created_at", { ascending: false }).limit(20);
+  if (saved.error) return fail("evaluation_read_failed", "无法读取已保存的语义评测。", 503, { requestId });
+  const savedSemanticEvaluation = matchingSavedSemanticReview(saved.data ?? [], {
+    runId: id, profileKey: material.profile.key, profileRevision: material.profile.revision,
+    baseFingerprint: material.baseFingerprint, rubricRevision: WORKBENCH_SEMANTIC_RUBRIC_REVISION,
+  });
+  return ok({ ...report, inputFingerprint, savedSemanticEvaluation: savedSemanticEvaluation ?? null }, { requestId });
 }
 
 /** Explicit, cost-bearing semantic review using the run's published model binding. */

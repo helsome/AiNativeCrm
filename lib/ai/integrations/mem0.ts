@@ -314,18 +314,20 @@ export async function readConfirmedCustomerMemory(
   query = "Customer preferences and confirmed communication context",
   signal?: AbortSignal,
 ) {
-  if (!integrationBinding(org, "mem0")) return { status: "disabled", memories: [] };
-  const binding = await enabledIntegration(pool, org, "mem0");
-  if (!binding) return { status: "disabled", memories: [] };
   await assertContact(pool, org, contact);
+  // CRM owns the confirmed facts. Optional Mem0 only ranks owned local IDs.
+  const binding = integrationBinding(org, "mem0")
+    ? await enabledIntegration(pool, org, "mem0").catch(() => null)
+    : null;
   const local = await integrationQuery<MemoryRow>(
     pool,
     "select * from ai_customer_memories where organization_id=$1 and contact_id=$2 and deleted_at is null order by created_at desc limit 50",
     [org, contact],
   );
   let ids: string[] = [];
-  let status = "local_fallback";
-  try {
+  let status = binding ? "local_fallback" : "local";
+  let providerStatus = binding ? "unavailable" : "disabled";
+  if (binding) try {
     const payload = await mem0Json(binding, "/search", {
       method: "POST",
       signal,
@@ -351,6 +353,7 @@ export async function readConfirmedCustomerMemory(
           .map((row) => row.id),
       );
     status = "mem0";
+    providerStatus = "connected";
   } catch {
     signal?.throwIfAborted();
   }
@@ -368,6 +371,12 @@ export async function readConfirmedCustomerMemory(
     : fresh.rows;
   return {
     status,
+    source: "crm_confirmed_facts",
+    providerStatus,
+    coverage: ordered.length > 10 ? "partial" : "complete",
+    returnedCount: Math.min(ordered.length, 10),
+    // Bounded selection, not a claim that all CRM facts were read.
+    readLimit: 50,
     memories: ordered.slice(0, 10).map((row) => ({
       id: row.id,
       category: row.category,

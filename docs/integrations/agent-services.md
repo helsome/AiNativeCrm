@@ -150,7 +150,9 @@ Prompts, outputs, CRM message bodies, tool arguments/results, hidden reasoning/p
 credentials, arbitrary exception text and personal actor IDs are never added to the trace payload.
 Organization/run correlation is pseudonymous. Per-org project keys are authorization; metadata is not.
 
-GET Eval stays read-only. Workbench's “保存并投递确定性 Eval” explicitly persists and queues deterministic
+GET Eval stays read-only and reloads an existing semantic report only when the profile, rubric,
+model identity and material fingerprint still match. It never invokes the model. The UI keeps
+the deterministic gates separate from the recorded Judge score. Workbench's “保存并投递确定性 Eval” explicitly persists and queues deterministic
 scores without invoking a model; explicit semantic Eval uses the existing judge and also mirrors the
 canonical report. Cached semantic reports can safely requeue a missing projection. Fingerprint,
 profile revision and rubric revision accompany scores. No judge is silently added by the exporter.
@@ -189,3 +191,24 @@ See [Langfuse deletion](https://langfuse.com/docs/administration/data-deletion) 
 10. Map: `docs/architecture/agent-services.architecture.json`
 
 Verification and unmeasured stages are recorded in `docs/testing/agent-services-2026-10-02.md`.
+
+## 2026-10-03：本地记忆与独立覆盖校验
+
+CRM SQL 中的人工确认记忆不依赖 Mem0 开关。`crm_get_contact` 与会话历史均显式返回
+`confirmed_customer_memory`：本地来源、provider 状态、complete / partial / unavailable 覆盖、
+返回条数和读取上限。Mem0 只对属于本组织且内容哈希一致的本地 ID 排序，不能成为事实源。
+每次读取前后重新检查联系人隐私资格；删除或匿名化后的事实不得从历史恢复。
+
+Eval profile revision 8、semantic rubric revision 2 增加独立 SQL 存在性校验。
+只核对本次成功 `crm_get_contact` 观察中的联系人，按组织和当前隐私资格限定，选择运行开始时
+已存在且在整个运行期间未删除的记忆 ID（不读取正文）。运行之后新增的数据不用于历史判错。
+没有配置第三方服务与“没有 CRM 记忆”是两件事；遗漏已存在事实进入 fail，不完整读取进入
+needs_review。覆盖匹配仍不能证明任意自然语言声明正确，也不是业务验收。
+
+闭环交付：人工保存 → SQL 权威事实 → 联系人/会话工具 → Pi observation → SQL 存在性校验
+→ 确定性 Eval → 显式真实 Judge → 保存/只读回放。恢复路径是读取 unavailable 明示、界面重试、
+旧 rubric 缓存不复用，不新增后台自动 Judge。证据导出仅允许本机固定合成演示；白名单保留计量、
+事件和脱敏工具摘要，不导出系统 Prompt、隐藏推理、凭据或原始客户正文。
+
+演示入口：`examples/chat-first-demo/dist/index.html` 的“真实模型录制”；查看历史录制不调用模型。
+真实运行和测试证据见 `docs/testing/agent-services-real-run-2026-10-03.md`。

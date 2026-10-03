@@ -104,6 +104,7 @@ type Detail = Run & {
   }>;
 };
 type EvaluationReport = {
+  savedSemanticEvaluation?: EvaluationReport | null;
   verdict: "pass" | "fail" | "needs_review" | "not_run";
   score: number | null;
   profileKey: string;
@@ -1445,12 +1446,16 @@ export function AgentCrmWorkbench({
                         {evalExportNotice?.runId === detail.id && (
                           <p className="mt-1 text-muted-foreground">{evalExportNotice.text}</p>
                         )}
-                        {detail.evaluation.semanticJudge.status === "completed" ? (
+                        {(detail.evaluation.savedSemanticEvaluation ?? detail.evaluation).semanticJudge.status === "completed" ? (
                           <div className="mt-2 rounded-md bg-muted p-2 text-muted-foreground">
-                            语义 Judge：{detail.evaluation.semanticJudge.verdict}
-                            {detail.evaluation.semanticJudge.score === undefined
+                            语义 Judge：{(detail.evaluation.savedSemanticEvaluation ?? detail.evaluation).semanticJudge.verdict}
+                            {(detail.evaluation.savedSemanticEvaluation ?? detail.evaluation).semanticJudge.score === undefined
                               ? ""
-                              : ` · ${detail.evaluation.semanticJudge.score}`}
+                              : ` · ${(detail.evaluation.savedSemanticEvaluation ?? detail.evaluation).semanticJudge.score}`}
+                            {detail.evaluation.savedSemanticEvaluation && <p>已保存的真实评测 · 本次读取未调用模型；上方为独立确定性门禁。</p>}
+                            {(detail.evaluation.savedSemanticEvaluation ?? detail.evaluation).semanticJudge.findings?.map(finding => (
+                              <p key={finding.code} className="mt-1">{finding.message}</p>
+                            ))}
                           </div>
                         ) : (
                           <>

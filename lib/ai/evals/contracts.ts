@@ -53,6 +53,12 @@ export interface AgentEvalRunInput {
   proposals: AgentEvalProposal[];
   /** Service-only execution state. Reports never expose these raw messages. */
   runtimeMessages: RuntimeMessage[];
+  /** Independently scoped SQL existence receipts at run end; never model supplied. */
+  confirmedMemoryExpectations?: Array<{
+    contactId: string;
+    memoryIds: string[];
+    asOf: string;
+  }>;
   collaborationRuns?: Array<{
     id: string;
     specialistKey: string | null;

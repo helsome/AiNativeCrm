@@ -108,7 +108,7 @@
       "lane": "core",
       "col": 0,
       "type": "service",
-      "label": "Canonical CRM Eval"
+      "label": "Canonical CRM Eval + independently scoped memory existence"
     },
     {
       "id": "ui",
@@ -119,6 +119,16 @@
     }
   ],
   "edges": [
+    {
+      "from": "sql",
+      "to": "pi",
+      "label": "Confirmed facts available even with Mem0 off"
+    },
+    {
+      "from": "sql",
+      "to": "eval",
+      "label": "Privacy-scoped existence throughout the run, no body export"
+    },
     {
       "from": "settings",
       "to": "mem0"

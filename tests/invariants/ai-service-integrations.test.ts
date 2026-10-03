@@ -35,6 +35,14 @@ beforeAll(() => {
       values('${memory}','${org}','${contact}',repeat('a',64),'${memory}','preference','Private fixture',repeat('b',64),'sending','in_flight');`);
 });
 describe("optional AI service SQL privacy and ownership", () => {
+  it("keeps confirmed local facts queryable without any optional provider activation", () => {
+    expect(sql(`select count(*) from ai_integration_settings where organization_id='${org}' and enabled`)).toBe("0");
+    expect(sql(`select count(*) from ai_customer_memories m join contacts c
+      on c.organization_id=m.organization_id and c.id=m.contact_id
+      where m.organization_id='${org}' and m.contact_id='${contact}' and m.deleted_at is null
+        and c.is_anonymized=false and c.is_merged_into is null`)).toBe("1");
+    expect(sql(`select count(*) from ai_customer_memories where organization_id='${other}' and contact_id='${contact}'`)).toBe("0");
+  });
   it("denies direct browser writes/reads to memory and manifest storage", () => {
     expect(sql("select has_table_privilege('authenticated','ai_customer_memories','SELECT')")).toBe(
       "f",

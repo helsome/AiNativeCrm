@@ -288,6 +288,21 @@ function memoryFixture() {
 }
 
 describe("Mem0 controlled real service paths", () => {
+  it("reads canonical confirmed facts without a vendor binding or network request", async () => {
+    vi.stubEnv("AI_INTEGRATION_BINDINGS", "");
+    const f = memoryFixture();
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const result = await readConfirmedCustomerMemory(f.pool, org, contact);
+    expect(result).toMatchObject({ status: "local", coverage: "complete", providerStatus: "disabled" });
+    expect(result.memories).toEqual([expect.objectContaining({ id: memoryId, body: f.row.body })]);
+    expect(fetch).not.toHaveBeenCalled();
+    await expect(readConfirmedCustomerMemory(f.pool, other, contact)).rejects.toThrow("contact_unavailable");
+    f.row.deleted_at = "2026-10-03T00:00:00Z";
+    expect((await readConfirmedCustomerMemory(f.pool, org, contact)).memories).toEqual([]);
+    f.unavailable();
+    await expect(readConfirmedCustomerMemory(f.pool, org, contact)).rejects.toThrow("contact_unavailable");
+  });
   it("writes infer:false once, verifies ownership and replays without duplicate creation", async () => {
     const f = memoryFixture();
     let records: unknown[] = [];
