@@ -47,6 +47,16 @@ describe("Workbench evidence provenance", () => {
     });
   });
 
+  it("recognizes actual organization-memory version/entry evidence without proving its prose", () => {
+    const cited = [{ sourceType: "knowledge" as const, sourceId: chunkId, claim: "Published memory policy" }];
+    expect(auditWorkbenchEvidenceProvenance(cited, input([
+      tool("crm_get_org_memory", { evidence: [{ id: chunkId, namespace: "organization_memory" }] }),
+    ]))).toEqual({ observed: 1, unobserved: 0, verified: 0, mismatched: 0, unverifiable: 0 });
+    expect(auditWorkbenchEvidenceProvenance(cited, input([
+      tool("crm_get_org_memory", { evidence: [{ id: chunkId }] }, true),
+    ])).unobserved).toBe(1);
+  });
+
   it("does not treat a related id, wrong resource type, or failed tool as observed", () => {
     const actual = input([
       tool("crm_get_lead", { lead: { id: leadId, contact_id: contactId } }),

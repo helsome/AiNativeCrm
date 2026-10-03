@@ -6,6 +6,8 @@ const decision = readFileSync(
   "app/api/v1/ai/workbench/runs/[id]/proposals/[proposalId]/decision/route.ts",
   "utf8",
 );
+const approvedAction = readFileSync("lib/ai/agents/workbench-approved-action.ts", "utf8");
+const sendDecision = readFileSync("lib/ai/agents/workbench-send-decision-recovery.ts", "utf8");
 const worker = readFileSync("workers/agent-worker/main.ts", "utf8");
 const startJob = readFileSync("lib/ai/agents/workbench-start-job.ts", "utf8");
 const resumeJob = readFileSync("lib/ai/agents/workbench-resume-job.ts", "utf8");
@@ -21,12 +23,18 @@ describe("Workbench durable worker wiring", () => {
     expect(route).toContain('kind: "workbench_start"');
     expect(route).toContain('status: "queued"');
     expect(workbenchUi).toContain('status === "running" || status === "queued"');
-    expect(workbenchUi).toContain('["running", "queued"].includes(detail.status)');
+    expect(workbenchUi).toContain('["queued", "running", "awaiting_confirmation"].includes(detail.status)');
   });
 
   it("enqueues human-approved continuation using the persisted proposal as a dedup key", () => {
-    expect(decision).toContain('kind: "workbench_resume"');
-    expect(decision).toContain("sourceEventId: proposalId");
+    expect(decision).toContain("finishWorkbenchApprovedAction(getRequestPool()");
+    expect(decision).toContain("finalizeWorkbenchSendDecision(getRequestPool()");
+    for (const transactionalWriter of [approvedAction, sendDecision]) {
+      expect(transactionalWriter).toContain("(organization_id,kind,source_event_id,payload,max_attempts)");
+      expect(transactionalWriter).toContain("values ($1,'workbench_resume',$2,jsonb_build_object('runId',$3::uuid),3)");
+      expect(transactionalWriter).toContain("[input.organizationId, input.proposalId, input.runId]");
+    }
+    expect(sendDecision).toContain("on conflict (organization_id,source_event_id)");
     expect(resumeJob).toContain('.eq("organization_id", job.organization_id)');
     expect(resumeJob).toContain("parseRuntimeMessages(state?.messages)");
   });

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 /**
@@ -49,7 +49,18 @@ describe("GET /api/v1/health — o motivo aponta para o que precisa ser feito", 
   beforeEach(() => {
     vi.resetModules();
     vi.doUnmock("@/lib/env");
+    // Health also probes Supabase. Control that independent dependency instead
+    // of attributing its timeout to Redis (or consulting a real customer host).
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.startsWith("https://projeto-do-cliente.supabase.co/"))
+          return new Response("[]", { status: 200 });
+        throw new TypeError("fetch failed");
+      }),
+    );
   });
+  afterEach(() => vi.unstubAllGlobals());
 
   it("⭐ `.env` com as aspas sobrando: o motivo é a CONFIGURAÇÃO, e o serviço nem é procurado", async () => {
     // A forma exata que um heredoc de instalador produz.
@@ -66,6 +77,9 @@ describe("GET /api/v1/health — o motivo aponta para o que precisa ser feito", 
     // O número é folgado de propósito — o que se mede é a AUSÊNCIA da tentativa,
     // não a latência.
     expect(decorrido, "houve ida à rede para um endereço malformado").toBeLessThan(2_000);
+    expect(vi.mocked(fetch).mock.calls.map(([url]) => String(url))).toEqual([
+      "https://projeto-do-cliente.supabase.co/rest/v1/organizations?select=id&limit=1",
+    ]);
   });
 
   it("⭐ configuração BEM formada e serviço inalcançável: o motivo volta a ser de alcance", async () => {
@@ -83,6 +97,7 @@ describe("GET /api/v1/health — o motivo aponta para o que precisa ser feito", 
       "a configuração é válida — chamar isto de erro de configuração manda o operador editar um arquivo correto",
     ).not.toBe("configuracao_invalida");
     expect(data.checks.redis.reason).toBeTruthy();
+    expect(vi.mocked(fetch).mock.calls.map(([url]) => String(url))).toContain("http://127.0.0.1:9");
   });
 
   it("o endereço malformado continua sem sair para quem não tem o segredo", async () => {

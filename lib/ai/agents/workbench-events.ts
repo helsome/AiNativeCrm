@@ -1,3 +1,6 @@
+import { integrationBinding } from "@/lib/ai/integrations/config";
+import { projectLangfuseRun } from "@/lib/ai/integrations/langfuse";
+import { getRequestPool } from "@/lib/agent-engine/db/request-pool";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type CrmAgentEventType =
@@ -27,7 +30,10 @@ export type CrmAgentEventType =
 
 const EVENT_FIELDS: Record<CrmAgentEventType, readonly string[]> = {
   run_started: ["agentId", "mode", "taskLength", "evalProfile", "knowledgeNamespaces"],
-  context_loaded: ["contactId", "leadId", "conversationId", "pipelineId"],
+  context_loaded: [
+    "contactId", "leadId", "conversationId", "pipelineId",
+    "orgMemoryRevision", "orgMemoryVersionId", "orgMemoryVersionNumber", "orgMemoryEntriesCount", "memoryResolution",
+  ],
   model_decision: [
     "toolResultCount",
     "proposedToolCount",
@@ -100,7 +106,13 @@ export async function appendWorkbenchEvent(
       event_type: input.type,
       payload: redactEventPayload(input.type, input.payload ?? {}),
     });
-    if (!error) return sequence;
+    if (!error) {
+      if (["run_completed", "run_partial", "run_failed", "run_cancelled"].includes(input.type) &&
+          integrationBinding(input.organizationId, "langfuse")) {
+        try { await projectLangfuseRun(getRequestPool(), input.organizationId, input.runId); } catch { /* local event remains canonical */ }
+      }
+      return sequence;
+    }
     if (error.code !== "23505") throw new Error(`workbench_event_append_failed:${error.message}`);
   }
   throw new Error("workbench_event_sequence_race");

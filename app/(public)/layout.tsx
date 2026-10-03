@@ -3,6 +3,7 @@ import { marcaEhADoProduto } from "@/lib/branding";
 import { marcaDaSaida } from "@/lib/branding/saida";
 import { createClient } from "@/lib/supabase/server";
 import { IdiomaProvider } from "@/lib/i18n/IdiomaProvider";
+import { idiomaDoVisitante } from "@/lib/i18n/idiomaAnonimo";
 
 /**
  * A casca das telas de acesso — login, cadastro, recuperação, MFA.
@@ -41,22 +42,24 @@ export default async function PublicLayout({ children }: { children: React.React
   // A maioria destas telas roda ANTES do login (não há usuário nenhum), mas
   // duas — `/login/mfa` e, em parte, `/login/recovery` — rodam com uma sessão
   // parcial já criada (primeiro fator verificado, segundo pendente). Onde há
-  // sessão, o idioma salvo no perfil vale; sem ela, `IdiomaProvider` já cai no
-  // padrão pt-BR sozinho (ver o cabeçalho do provider) — nunca lança.
+  // sessão, o idioma salvo no perfil vale; sem ela, resolva Accept-Language
+  // como as páginas públicas. O provider e os títulos devem usar a mesma cadeia.
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const locale = (user?.user_metadata?.locale as string | undefined) ?? null;
+  const locale = await idiomaDoVisitante(
+    (user?.user_metadata?.locale as string | undefined) ?? null,
+  );
 
   return (
     <IdiomaProvider locale={locale}>
       <div className="grid min-h-[100dvh] bg-background lg:grid-cols-[minmax(24rem,0.92fr)_1.08fr]">
         <main className="flex min-h-[100dvh] items-center justify-center px-5 py-10 sm:px-8">
           <div className="w-full max-w-sm space-y-6">
-          {marca.logoUrl ? (
-            <div className="flex justify-center">
-              {/*
+            {marca.logoUrl ? (
+              <div className="flex justify-center">
+                {/*
                 <img> em vez de next/image pelo mesmo motivo da barra lateral: a URL
                 é de quem hospeda e o `next/image` exige allowlist de domínios
                 fechada em BUILD — a imagem pré-buildada do self-host recusaria o
@@ -72,45 +75,45 @@ export default async function PublicLayout({ children }: { children: React.React
                 "primeira <img> da página", e uma asserção de negação com seletor
                 largo passa sozinha assim que outra imagem entra na tela.
               */}
-              {/* O chip `dark:bg-white` é o mesmo da barra lateral
+                {/* O chip `dark:bg-white` é o mesmo da barra lateral
                 (`components/shell/Sidebar.tsx`): esta tela também respeita
                 `data-theme` (o `ThemeProvider` embrulha a raiz inteira, login
                 incluso), então um logo escuro contra `--color-surface` escuro tem
                 o mesmo problema de contraste aqui. */}
-              <div className="rounded-md dark:bg-white dark:px-3 dark:py-2 dark:shadow-sm">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  data-testid="logo-da-fachada"
-                  src={marca.logoUrl}
-                  alt={marca.nome}
-                  className="h-10 w-auto max-w-[12rem] object-contain"
-                />
+                <div className="rounded-md dark:bg-white dark:px-3 dark:py-2 dark:shadow-sm">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    data-testid="logo-da-fachada"
+                    src={marca.logoUrl}
+                    alt={marca.nome}
+                    className="h-10 w-auto max-w-[12rem] object-contain"
+                  />
+                </div>
               </div>
-            </div>
-          ) : marcaEhADoProduto({ name: marca.nome, logoUrl: null }) ? (
-            <div className="flex justify-center">
-              <LogotipoDoProduto nome={marca.nome} className="h-12 w-auto" />
-            </div>
-          ) : null}
-          {children}
+            ) : marcaEhADoProduto({ name: marca.nome, logoUrl: null }) ? (
+              <div className="flex justify-center">
+                <LogotipoDoProduto nome={marca.nome} className="h-12 w-auto" />
+              </div>
+            ) : null}
+            {children}
           </div>
         </main>
-        <aside className="relative hidden min-h-[100dvh] overflow-hidden border-l bg-[#171513] p-12 text-[#f6f1ea] lg:flex lg:flex-col lg:justify-between xl:p-16">
-          <div aria-hidden className="pointer-events-none absolute inset-0 opacity-70" style={{ background: "radial-gradient(ellipse at 82% 16%, rgba(196,115,83,.18), transparent 35%), radial-gradient(ellipse at 12% 88%, rgba(138,126,107,.13), transparent 42%)" }} />
+        <aside className="relative hidden min-h-[100dvh] overflow-hidden border-l bg-surface p-12 text-text lg:flex lg:flex-col lg:justify-between xl:p-16">
           <div className="relative z-10">
-            <p className="text-sm font-medium tracking-wide text-[#d79376]">{marca.nome}</p>
-            <h2 className="mt-20 max-w-xl text-4xl font-semibold leading-tight tracking-tight xl:text-5xl">
-              客户关系持续向前，<br />每一步都有 Agent 协助。
+            <p className="text-sm font-medium tracking-wide text-text-muted">{marca.nome}</p>
+            <h2 className="mt-20 max-w-xl text-4xl leading-tight font-semibold tracking-tight xl:text-5xl">
+              客户关系持续向前，
+              <br />
+              每一步都有 Agent 协助。
             </h2>
-            <p className="mt-6 max-w-lg text-base leading-7 text-[#c0b6a7]">
+            <p className="mt-6 max-w-lg text-base leading-7 text-text-muted">
               在同一个工作空间里查看客户、跟进与执行结果。把重复操作交给 Agent，把关键决策留给团队。
             </p>
           </div>
-          <div className="relative z-10 flex items-center justify-between border-t border-white/10 pt-5 text-xs text-[#8a7e6b]">
-            <span>{marca.nome}</span><span>客户 · 运营 · 智能协作</span>
+          <div className="relative z-10 flex items-center justify-between border-t border-border pt-5 text-xs text-text-muted">
+            <span>{marca.nome}</span>
+            <span>客户 · 运营 · 智能协作</span>
           </div>
-          <div aria-hidden className="absolute -bottom-40 -right-24 h-[32rem] w-[32rem] rounded-full border border-white/10" />
-          <div aria-hidden className="absolute -bottom-24 -right-8 h-[24rem] w-[24rem] rounded-full border border-[#d79376]/20" />
         </aside>
       </div>
     </IdiomaProvider>

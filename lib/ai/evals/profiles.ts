@@ -42,7 +42,7 @@ const collaboration = {
 export const BUILTIN_EVAL_PROFILES: Readonly<Record<BuiltinEvalProfileKey, AgentEvalProfile>> = {
   crm_intelligence_v1: {
     key: "crm_intelligence_v1",
-    revision: 7,
+    revision: 8,
     criteria: [completion, answerQuality, grounding, reliability, policy, efficiency, collaboration],
     knowledgeUse: "conditional",
     maxToolCalls: 12,
@@ -50,7 +50,7 @@ export const BUILTIN_EVAL_PROFILES: Readonly<Record<BuiltinEvalProfileKey, Agent
   },
   sales_operations_v1: {
     key: "sales_operations_v1",
-    revision: 7,
+    revision: 8,
     criteria: [completion, answerQuality, reliability, policy, grounding, efficiency, collaboration],
     knowledgeUse: "optional",
     maxToolCalls: 16,
@@ -58,7 +58,7 @@ export const BUILTIN_EVAL_PROFILES: Readonly<Record<BuiltinEvalProfileKey, Agent
   },
   customer_communications_v1: {
     key: "customer_communications_v1",
-    revision: 7,
+    revision: 8,
     criteria: [policy, grounding, completion, answerQuality, reliability, efficiency, collaboration],
     knowledgeUse: "conditional",
     maxToolCalls: 12,
@@ -66,7 +66,7 @@ export const BUILTIN_EVAL_PROFILES: Readonly<Record<BuiltinEvalProfileKey, Agent
   },
   crm_supervisor_v1: {
     key: "crm_supervisor_v1",
-    revision: 7,
+    revision: 8,
     criteria: [completion, answerQuality, reliability, policy, efficiency, grounding, collaboration],
     knowledgeUse: "optional",
     maxToolCalls: 20,
@@ -76,7 +76,7 @@ export const BUILTIN_EVAL_PROFILES: Readonly<Record<BuiltinEvalProfileKey, Agent
 
 export const DEFAULT_AGENT_EVAL_PROFILE: AgentEvalProfile = {
   key: "crm_agent_default_v1",
-  revision: 7,
+  revision: 8,
   criteria: [completion, answerQuality, reliability, policy, efficiency, grounding, collaboration],
   knowledgeUse: "optional",
   maxToolCalls: 16,

@@ -26,6 +26,10 @@ export interface TrechoEncontrado {
   content: string;
   similarity: number;
   metadata?: Record<string, unknown> | null;
+  /** Identidade do índice observado, não uma aprovação comercial da política. */
+  index_version_id?: string;
+  position?: number;
+  content_hash?: string;
 }
 
 export interface ResultadoDaBusca {
@@ -95,10 +99,22 @@ export async function buscarConhecimento(
 
   const linhas = (data ?? []) as LinhaDaRpc[];
   const melhor = linhas.length > 0 ? Math.max(...linhas.map((l) => l.similarity)) : null;
+  const encontrados = linhas.filter((l) => l.similarity >= p.limiar);
+  // Leia a versão do CHUNK observado, nunca o ponteiro ativo da fonte: uma
+  // reindexação concorrente pode já tê-lo trocado depois da busca vetorial.
+  const { data: chunks, error: provenanceError } = encontrados.length
+    ? await supabase.from("ai_chunks")
+        .select("id, knowledge_source_id, kb_version_id, position, content_hash")
+        .eq("organization_id", p.organizationId)
+        .in("knowledge_source_id", p.knowledgeSourceIds)
+        .in("id", encontrados.map((l) => l.chunk_id))
+    : { data: [], error: null };
+  if (provenanceError)
+    throw new Error(`proveniencia_de_conhecimento_falhou: ${provenanceError.message}`);
+  const provenance = new Map((chunks ?? []).map((chunk) => [chunk.id, chunk]));
 
   return {
-    trechos: linhas
-      .filter((l) => l.similarity >= p.limiar)
+    trechos: encontrados
       .map((l) => ({
         chunk_id: l.chunk_id,
         knowledge_source_id: l.knowledge_source_id,
@@ -106,6 +122,13 @@ export async function buscarConhecimento(
         content: l.content,
         similarity: l.similarity,
         metadata: l.metadata ?? null,
+        ...(provenance.get(l.chunk_id)?.knowledge_source_id === l.knowledge_source_id
+          ? {
+              index_version_id: provenance.get(l.chunk_id)!.kb_version_id as string,
+              position: provenance.get(l.chunk_id)!.position as number,
+              content_hash: provenance.get(l.chunk_id)!.content_hash as string,
+            }
+          : {}),
       })),
     melhorSimilaridade: melhor,
   };

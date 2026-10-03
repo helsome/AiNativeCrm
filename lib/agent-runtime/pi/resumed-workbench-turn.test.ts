@@ -1,11 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 import type { RuntimeMessage } from "@/lib/agent-runtime";
+import { getCurrentSystemPrompt } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import { PiAgentRuntime } from "@/lib/agent-runtime/pi/runtime";
+import { runPiAiSdkCall } from "@/lib/agent-runtime/pi/ai-sdk-compat";
 
 const mocks = vi.hoisted(() => ({
   model: vi.fn(),
   reversible: vi.fn(),
   event: vi.fn(async () => undefined),
-  query: vi.fn(async () => ({ rows: [] })),
+  query: vi.fn(async (sql: string) => ({ rows: sql.includes("from org_memory_pointers") ? [{
+    id: "memory-version-4", version_id: "memory-version-4", organization_id: "org-1", version_number: 4,
+    content: "Current published policy for resumed runs", created_at: "2026-10-01T00:00:00Z",
+    published_at: "2026-10-01T00:00:00Z",
+  }] : [] })),
   stopForDirection: vi.fn(async (
     _pool: unknown,
     _input: { organizationId: string; missionId: string; runId: string },
@@ -43,10 +51,84 @@ vi.mock("@/lib/agent-engine/edge/crm/mcp-tools", () => ({
   }),
 }));
 
-import { runResumedWorkbenchTurn } from "./run-resumed-workbench-turn";
-import { MissionDirectionFenceError } from "./mission-direction-fence";
+import { runResumedWorkbenchTurn } from "@/lib/ai/agents/run-resumed-workbench-turn";
+import { MissionDirectionFenceError } from "@/lib/ai/agents/mission-direction-fence";
 
 describe("resumed workbench turn", () => {
+  it("delivers the current memory revision to real Pi after JSON restore and persists that same context", async () => {
+    vi.clearAllMocks();
+    let status = "running";
+    let savedMessages: RuntimeMessage[] = [];
+    const admin = {
+      from(table: string) {
+        const builder = {
+          select: () => builder, eq: () => builder, order: () => builder, limit: () => builder,
+          upsert: (row: { messages: RuntimeMessage[] }) => {
+            savedMessages = JSON.parse(JSON.stringify(row.messages));
+            return Promise.resolve({ error: null });
+          },
+          update: (row: { status?: string }) => {
+            if (table === "ai_workbench_runs" && row.status) status = row.status;
+            return builder;
+          },
+          maybeSingle: async () => ({ data: table === "ai_workbench_runs" ? { status } : null, error: null }),
+          then: (resolve: (value: { error: null; count: number }) => unknown) =>
+            Promise.resolve(resolve({ error: null, count: 0 })),
+        };
+        return builder;
+      },
+    };
+    let providerContext = "not called";
+    const faux = fauxProvider({ provider: "crm-test-provider", models: [{ id: "crm-test-model" }] });
+    faux.setResponses([
+      fauxAssistantMessage("Earlier finding."),
+      (context) => {
+        providerContext = getCurrentSystemPrompt(context.messages);
+        return fauxAssistantMessage(fauxToolCall("submit_workbench_result", {
+          summary: "已按当前规则完成核对。", evidence: [], missingInformation: [],
+          nextStep: "人工复核", wakeCondition: "none",
+        }), { stopReason: "toolUse" });
+      },
+    ]);
+    const runtime = new PiAgentRuntime(() => ({
+      model: faux.getModel() as never,
+      streamFn: faux.provider.streamSimple.bind(faux.provider) as never,
+    }));
+    const model = { provider: "crm-test-provider", model: "crm-test-model", apiKey: "test-key" };
+    const first = await runtime.run({ systemPrompt: "OLD_MEMORY_v1", prompt: "核对报价", model });
+    // The gateway transport is replaced; the actual compatibility adapter,
+    // Pi core, history restore, tools, and event callbacks all execute below.
+    mocks.model.mockImplementation(async (_deps, input) => {
+      const result = await runPiAiSdkCall({
+        system: input.system, messages: input.messages, runtimeMessages: input.runtimeMessages,
+        tools: input.tools, maxSteps: input.maxSteps, abortSignal: input.abortSignal,
+        shouldStopAfterTurn: () => true, onEvent: input.onEvent, model, runtime,
+      });
+      return { result, events: result.events,
+        usage: { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens }, costCents: 0 };
+    });
+    await runResumedWorkbenchTurn({
+      admin: admin as never, organizationId: "org-1", runId: "run-1", jobId: "job-1",
+      agentId: "agent-1", missionId: null, versionId: "version-1", runtimeState: { versionId: "version-1" },
+      task: "核对报价", mode: "inspect",
+      scope: { contactId: null, leadId: null, conversationId: null, pipelineId: null, channelId: null },
+      messages: JSON.parse(JSON.stringify(first.messages)), budget: { maxSteps: 2 }, priorFinalText: null,
+    });
+    const eventCalls = mocks.event.mock.calls as unknown as Array<[unknown, {
+      type: string; payload: Record<string, unknown>;
+    }]>;
+    const provenance = eventCalls.find(([, event]) => event.type === "context_loaded")?.[1].payload;
+    expect(provenance).toMatchObject({ orgMemoryVersionId: "memory-version-4", orgMemoryVersionNumber: 4,
+      orgMemoryRevision: expect.stringMatching(/^sha256:/), memoryResolution: "current_published" });
+    expect(providerContext).toContain("Current published policy for resumed runs");
+    expect(providerContext).toContain(`Revisão: ${provenance?.orgMemoryRevision}`);
+    expect(providerContext).not.toContain("OLD_MEMORY_v1");
+    expect(savedMessages[0]).toEqual({ role: "system", content: providerContext });
+    expect(savedMessages.some((message) => message.role === "assistant" && message.content === "Earlier finding.")).toBe(true);
+    expect(mocks.model).toHaveBeenCalledOnce();
+    expect(status).toBe("completed");
+  });
+
   it("stops a stale Mission direction without retrying the model or reporting resume_failed", async () => {
     vi.clearAllMocks();
     const beforeSideEffect = vi.fn(async () => undefined);
@@ -193,6 +275,16 @@ describe("resumed workbench turn", () => {
     });
 
     expect(mocks.model).toHaveBeenCalledTimes(3);
+    for (const [, input] of mocks.model.mock.calls) {
+      expect(input.system).toContain("Current published policy for resumed runs");
+      expect(input.system).toContain("Revisão: sha256:");
+    }
+    expect(mocks.event).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      type: "context_loaded", payload: expect.objectContaining({
+        orgMemoryVersionId: "memory-version-4", orgMemoryVersionNumber: 4,
+        memoryResolution: "current_published",
+      }),
+    }));
     expect(mocks.reversible).toHaveBeenCalledTimes(2);
     expect(modelInputs[1]?.some((message) => message.role === "assistant" && message.content === "已提议更新 1")).toBe(true);
     expect(modelInputs[2]?.some((message) => message.role === "assistant" && message.content === "已提议更新 2")).toBe(true);

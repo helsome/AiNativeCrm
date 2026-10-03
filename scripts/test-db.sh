@@ -116,6 +116,14 @@ arvore_mexeu() {
 }
 
 cleanup() {
+  test_db_exit_code=$?
+  if [ "$test_db_exit_code" -ne 0 ]; then
+    # Only this disposable harness container, never the developer's CRM DB.
+    # Preserve the crash cause before --rm removes the only diagnostic evidence.
+    echo "==> failed disposable database: container status and last server diagnostics" >&2
+    docker inspect "$CONTAINER" --format 'exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' >&2 2>/dev/null || true
+    docker logs --tail 60 "$CONTAINER" >&2 || true
+  fi
   echo "==> teardown: removendo container $CONTAINER"
   # `-v` REMOVE OS VOLUMES ANÔNIMOS, e sem ele cada rodada vazava ~68 MB.
   #
@@ -166,7 +174,9 @@ echo "    ✓ publicado em 127.0.0.1:$PORT"
 # testar via TCP 127.0.0.1 evita o falso-ready da fase de init).
 ready=0
 for _ in $(seq 1 60); do
-  if docker exec "$CONTAINER" psql -h 127.0.0.1 -U postgres -d postgres -c "select 1" >/dev/null 2>&1; then
+  # Match the disposable credential supplied above. A TCP probe without a
+  # password falsely times out when the image correctly requires SCRAM.
+  if docker exec -e PGPASSWORD=postgres "$CONTAINER" psql -h 127.0.0.1 -U postgres -d postgres -c "select 1" >/dev/null 2>&1; then
     ready=1; break
   fi
   sleep 1

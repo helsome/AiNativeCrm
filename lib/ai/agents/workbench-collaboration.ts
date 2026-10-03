@@ -21,6 +21,7 @@ import {
 import { appendWorkbenchEvent } from "@/lib/ai/agents/workbench-events";
 import { workbenchToolEffect } from "@/lib/ai/agents/tool-effects";
 import type { KnowledgeEvidence } from "@/lib/ai/knowledge/contracts";
+import { normalizeKnowledgeEvidence } from "@/lib/ai/knowledge/evidence";
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { getRequestPool } from "@/lib/agent-engine/db/request-pool";
 import { extractProductFinalAnswer } from "@/lib/ai/agents/final-answer";
@@ -328,44 +329,16 @@ function structuredValue(message: Extract<RuntimeMessage, { role: "tool" }>): un
   }
 }
 
-function knowledgeEvidence(value: unknown): KnowledgeEvidence[] {
-  if (!value || typeof value !== "object") return [];
-  if (Array.isArray(value)) return value.flatMap(knowledgeEvidence);
-  const record = value as Record<string, unknown>;
-  if (Array.isArray(record.evidence))
-    return record.evidence.flatMap((item) => {
-      if (!item || typeof item !== "object") return [];
-      const evidence = item as Record<string, unknown>;
-      if (typeof evidence.id !== "string") return [];
-      return [
-        {
-          id: evidence.id,
-          namespace:
-            evidence.namespace === "organization_memory"
-              ? "organization_memory"
-              : "organization_wiki",
-          kind: evidence.kind === "wiki_page" ? "wiki_page" : "document",
-          title: typeof evidence.title === "string" ? evidence.title : "知识证据",
-          excerpt: typeof evidence.excerpt === "string" ? evidence.excerpt.slice(0, 1200) : "",
-          locator: {
-            provider: "crm_knowledge",
-            sourceId: typeof evidence.sourceId === "string" ? evidence.sourceId : evidence.id,
-            ...(typeof evidence.revision === "string" ? { revision: evidence.revision } : {}),
-          },
-          ...(typeof evidence.score === "number" ? { score: evidence.score } : {}),
-        } satisfies KnowledgeEvidence,
-      ];
-    });
-  return Object.values(record).flatMap(knowledgeEvidence);
-}
 
 function toolEvidence(
   message: Extract<RuntimeMessage, { role: "tool" }>,
   specialistKey: string,
 ): KnowledgeEvidence[] {
   if (message.isError) return [];
-  if (message.toolName === "crm_search_knowledge")
-    return knowledgeEvidence(structuredValue(message));
+  if (["crm_search_knowledge", "crm_get_org_memory"].includes(message.toolName)) {
+    const evidence = normalizeKnowledgeEvidence(structuredValue(message));
+    if (evidence.length || message.toolName === "crm_search_knowledge") return evidence;
+  }
   const namespace = message.toolName.includes("conversation")
     ? "conversation_history"
     : message.toolName === "crm_get_org_memory"
@@ -448,6 +421,7 @@ class PiWorkbenchSpecialistExecutor implements AgentSpecialistExecutor {
             credentialId: childConfig.credentialId,
           },
           system: [
+            childConfig.systemPrompt,
             `你是${input.task.specialist.role}，是父 Agent 的只读 specialist。`,
             input.task.specialist.objective,
             "只允许使用分配给你的只读工具。必须至少调用一个相关工具取得 observation 后再输出；每个相同范围的工具最多调用一次。",

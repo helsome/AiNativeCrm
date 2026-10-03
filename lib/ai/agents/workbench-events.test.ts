@@ -8,6 +8,17 @@ describe("CRM workbench event payloads", () => {
     })).toEqual({ contactId: "contact-1", conversationId: "conversation-1" });
   });
 
+  it("retains only organization-memory provenance, never the published policy body", () => {
+    expect(redactEventPayload("context_loaded", {
+      orgMemoryRevision: "sha256:revision", orgMemoryVersionId: "version-3",
+      orgMemoryVersionNumber: 3, orgMemoryEntriesCount: 2, memoryResolution: "current_published",
+      content: "private policy", entries: [{ body: "private learning" }],
+    })).toEqual({
+      orgMemoryRevision: "sha256:revision", orgMemoryVersionId: "version-3",
+      orgMemoryVersionNumber: 3, orgMemoryEntriesCount: 2, memoryResolution: "current_published",
+    });
+  });
+
   it("redacts secret-shaped fields even when nested in an allowed field", () => {
     expect(redactEventPayload("tool_proposed", {
       tool: "crm_update_lead", proposalId: "proposal-1", api_key: "never-store-this", extra: "discard",

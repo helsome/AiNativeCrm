@@ -60,6 +60,8 @@ const diasDeRetencao = (nome: string, padrao: number) =>
     });
 
 const schema = z.object({
+  // Optional server-only service bindings; detailed validation fails closed per integration.
+  AI_INTEGRATION_BINDINGS: z.string().optional(),
   // Node
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 

@@ -4,6 +4,7 @@ import { ok, fail } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { loadWorkbenchObservedEvidence } from "@/lib/ai/agents/workbench-observed-evidence";
 
 export const dynamic = "force-dynamic";
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -21,7 +22,7 @@ export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
     .eq("organization_id", authz.org.orgId).eq("id", id).maybeSingle();
   if (error) return fail("internal_error", "无法读取工作台运行。", 500, { requestId });
   if (!run) return fail("not_found", "run 不存在。", 404, { requestId });
-  const [{ data: events }, { data: proposals }, { data: specialists }, { data: mission }] = await Promise.all([
+  const material = await Promise.all([
     admin.from("ai_agent_run_events").select("id, sequence, event_type, payload, created_at").eq("organization_id", authz.org.orgId).eq("run_id", id).order("sequence", { ascending: true }),
     admin.from("ai_agent_action_proposals").select("id, sequence, tool_name, preview, status, decision_reason, decision_at, result_summary, compensation_args, created_at").eq("organization_id", authz.org.orgId).eq("run_id", id).order("sequence", { ascending: true }),
     admin.from("ai_workbench_runs")
@@ -36,6 +37,18 @@ export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
           .eq("organization_id", authz.org.orgId).eq("id", run.mission_id).maybeSingle()
       : Promise.resolve({ data: null }),
   ]);
+  if (material.some((item) => "error" in item && item.error))
+    return fail("internal_error", "运行材料读取不完整，请重试。", 500, { requestId });
+  const [{ data: events }, { data: proposals }, { data: specialists }, { data: mission }] = material;
+  let observedEvidence;
+  try {
+    observedEvidence = await loadWorkbenchObservedEvidence(admin, {
+      organizationId: authz.org.orgId, agentId: run.agent_id,
+      runIds: [id, ...(specialists ?? []).map((child) => child.id)],
+    });
+  } catch {
+    return fail("internal_error", "无法核对本次运行的知识证据，请重试。", 500, { requestId });
+  }
   // Reply bodies are read through the authenticated user's conversation RLS,
   // never copied into the manager-readable run or event ledger.
   const userDb = await createClient();
@@ -57,6 +70,7 @@ export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
       ...(draftByProposal.get(proposal.id) ? { draft_body: draftByProposal.get(proposal.id) } : {}),
     })),
     specialists: specialists ?? [],
+    observed_evidence: observedEvidence,
     mission,
   }, { requestId });
 }

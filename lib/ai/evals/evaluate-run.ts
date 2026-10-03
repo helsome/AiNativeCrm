@@ -98,6 +98,28 @@ function evaluateAnswerQuality(input: AgentEvalRunInput, label: string): AgentEv
       { code: "answer_unavailable", message: "尚无可评测的最终答案。" },
     ]);
   const findings: AgentEvalFinding[] = [];
+  for (const expected of input.confirmedMemoryExpectations ?? []) {
+    const observations = input.runtimeMessages
+      .filter(message => message.role === "tool" && message.toolName === "crm_get_contact" && !message.isError)
+      .map(parseStructuredToolResult)
+      .filter((value): value is Record<string, unknown> => !!value && typeof value === "object" &&
+        (value as Record<string, unknown>).id === expected.contactId);
+    if (!observations.length) continue;
+    const reads = observations.map(value => value.confirmed_customer_memory as
+      { coverage?: string; memories?: Array<{ id?: string }> } | undefined);
+    const observed = new Set(reads.flatMap(read => Array.isArray(read?.memories) ? read.memories.map(m => m.id) : []));
+    const missing = expected.memoryIds.filter(id => !observed.has(id)).length;
+    if (missing && !reads.some(read => read?.coverage === "partial"))
+      findings.push({ code: "confirmed_memory_not_observed",
+        message: "独立 CRM 存在性记录表明运行结束时有确认记忆，但工具观察遗漏了这些事实。",
+        evidence: { missing, expected: expected.memoryIds.length } });
+    else if (reads.some(read => read?.coverage !== "complete"))
+      findings.push({ code: "confirmed_memory_coverage_incomplete",
+        message: "确认记忆读取不完整或不可用；不能把未读取解释为不存在。" });
+    if (expected.memoryIds.length)
+      findings.push({ code: "memory_claims_require_semantic_review",
+        message: "确认记忆的存在性已独立核对；自然语言结论仍需语义复核，并非业务验收。" });
+  }
   if (input.resultDocument != null) {
     const parsed = workbenchResultDocumentSchema.safeParse(input.resultDocument);
     if (!parsed.success)
@@ -170,7 +192,8 @@ function evaluateAnswerQuality(input: AgentEvalRunInput, label: string): AgentEv
       (finding) => finding.code.startsWith("internal_") ||
         finding.code === "answer_likely_truncated" ||
         finding.code === "structured_result_unobserved_evidence" ||
-        finding.code === "structured_fact_assertion_mismatch",
+        finding.code === "structured_fact_assertion_mismatch" ||
+        finding.code === "confirmed_memory_not_observed",
     )
   )
     return result("answer_quality", label, "fail", findings);

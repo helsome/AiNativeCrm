@@ -101,7 +101,12 @@ export async function PATCH(req: NextRequest, ctx: Ctx): Promise<Response> {
     .eq("id", id)
     .maybeSingle();
   if ((owner as { origin?: string } | null)?.origin === "builtin") {
-    return fail("builtin_locked", t("Agents nativos são somente leitura. Copie o Agent para personalizar."), 409, { requestId });
+    return fail(
+      "builtin_locked",
+      t("Agents nativos são somente leitura. Copie o Agent para personalizar."),
+      409,
+      { requestId },
+    );
   }
   if (existing.status !== "draft") {
     return fail("version_immutable", t("Apenas versões 'draft' podem ser editadas."), 409, {
@@ -116,6 +121,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx): Promise<Response> {
   if (patch.model !== undefined) update.model = patch.model;
   if (patch.credential_id !== undefined) update.credential_id = patch.credential_id;
   if (patch.tool_ids !== undefined) update.tool_ids = patch.tool_ids;
+  if (patch.knowledge_source_ids !== undefined)
+    update.knowledge_source_ids = patch.knowledge_source_ids;
   if (patch.trigger_config !== undefined) update.trigger_config = patch.trigger_config;
   if (patch.channel_session_id !== undefined) update.channel_session_id = patch.channel_session_id;
   if (patch.max_steps !== undefined) update.max_steps = patch.max_steps;

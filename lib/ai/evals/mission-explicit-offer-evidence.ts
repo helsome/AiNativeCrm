@@ -1,4 +1,5 @@
 import type { Pool, PoolClient } from "pg";
+import { SIGNED_MESSAGE_RECEIPT_SQL } from "@/lib/channels/signed-receipt";
 import { loadMissionDeliveryEvidence } from "@/lib/ai/evals/mission-delivery-evidence";
 import { verifyCustomerDelivery } from "@/lib/ai/evals/evaluate-mission";
 import { explicitOfferTermsSchema, formatExplicitOffer } from "@/lib/ai/evals/mission-explicit-offer";
@@ -165,8 +166,7 @@ async function evaluateExplicitOfferSnapshot(
          select 1 from public.webhook_events_log w
          where w.organization_id=m.organization_id
            and w.channel_session_id=m.channel_session_id
-           and w.provider='waha' and w.valid_signature is true
-           and w.event_type in ('message','message.any')
+           and ${SIGNED_MESSAGE_RECEIPT_SQL}
            and w.crm_inbound_message_id=m.id
            and w.external_id=m.external_id
            and w.received_at>$6 and w.received_at<=$7

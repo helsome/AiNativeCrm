@@ -65,7 +65,7 @@ vi.mock("@/lib/supabase/admin", () => ({
           }),
         };
       }
-      return { insert: async () => ({ error: null }) };
+      return { insert: () => ({ select: () => ({ maybeSingle: async () => ({ data: { id: "receipt" }, error: null }) }) }) };
     },
     // Sessão sem segredo utilizável: o caso real de quem roda WAHA Core.
     rpc: async () => ({ data: null, error: null }),

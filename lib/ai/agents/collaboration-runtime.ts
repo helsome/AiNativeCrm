@@ -109,42 +109,49 @@ export function detectCollaborationConflicts(
         });
     }
   }
-  const evidenceByLocator = new Map<
-    string,
-    { excerpt: string; specialistKey: string; revision?: string }
-  >();
+  const sources = new Map<string, { specialistKey: string; revision?: string }>();
+  const excerpts = new Map<string, { excerpt: string; specialistKey: string }>();
   for (const result of results) {
     for (const evidence of result.evidence) {
-      const key = `${evidence.locator.provider}:${evidence.locator.sourceId}`;
-      const current = evidenceByLocator.get(key);
+      const sourceKey = `${evidence.locator.provider}:${evidence.locator.sourceId}`;
+      const source = sources.get(sourceKey);
+      // Reindexing creates new chunk IDs. Compare source revisions separately
+      // so differing chunks cannot hide that specialists observed different indexes.
+      if (
+        source &&
+        source.specialistKey !== result.specialistKey &&
+        source.revision &&
+        evidence.locator.revision &&
+        source.revision !== evidence.locator.revision
+      )
+        appendConflict({
+          code: "stale_state",
+          specialistKeys: [source.specialistKey, result.specialistKey],
+          field: sourceKey,
+          message: "两个 specialist 读取了同一来源的不同 revision，写入前必须重新读取。",
+        });
+      if (!source)
+        sources.set(sourceKey, {
+          specialistKey: result.specialistKey,
+          revision: evidence.locator.revision,
+        });
+      // Different paragraphs from one document are complementary evidence, not
+      // contradictory claims. Only compare excerpts of the same immutable item.
+      const key = `${sourceKey}:${evidence.locator.revision ?? ""}:${evidence.id}`;
+      const current = excerpts.get(key);
       if (
         current &&
-        current.excerpt.trim() !== evidence.excerpt.trim() &&
-        current.specialistKey !== result.specialistKey
+        current.specialistKey !== result.specialistKey &&
+        current.excerpt.trim() !== evidence.excerpt.trim()
       )
         appendConflict({
           code: "evidence_disagreement",
           specialistKeys: [current.specialistKey, result.specialistKey],
           field: key,
-          message: "两个 specialist 对同一证据来源给出了不同摘录，父 Agent 必须显式核对。",
+          message: "两个 specialist 对同一版本的同一证据片段给出了不同摘录，需要核对原文。",
         });
-      else
-        evidenceByLocator.set(key, {
-          excerpt: evidence.excerpt,
-          specialistKey: result.specialistKey,
-          revision: evidence.locator.revision,
-        });
-      if (
-        current?.revision &&
-        evidence.locator.revision &&
-        current.revision !== evidence.locator.revision
-      )
-        appendConflict({
-          code: "stale_state",
-          specialistKeys: [current.specialistKey, result.specialistKey],
-          field: key,
-          message: "两个 specialist 读取了同一来源的不同 revision，写入前必须重新读取。",
-        });
+      if (!current)
+        excerpts.set(key, { excerpt: evidence.excerpt, specialistKey: result.specialistKey });
     }
   }
   return conflicts;
@@ -367,10 +374,17 @@ export function formatCollaborationContext(outcome: AgentCollaborationOutcome): 
         : rawSummary;
     return [
       `### ${result.specialistKey} (${result.status})`,
+      `child_run_id: ${result.childRunId}`,
       summary,
       missing,
       `证据条目：${result.evidence.length}；工具调用：${result.toolCalls}`,
       `结构化 Claims：${result.claims.length}`,
+      `可引用证据 ID（最多 12 条）：${
+        result.evidence
+          .slice(0, 12)
+          .map((evidence) => evidence.id)
+          .join(", ") || "无"
+      }`,
     ].join("\n");
   });
   const conflicts = outcome.conflicts.length

@@ -1,3 +1,4 @@
+import { beginLangfuseCall } from "@/lib/ai/integrations/langfuse";
 import { guardServiceTools } from "@/lib/atendimento/fronteira-server";
 import { createAgentRuntime } from "@/lib/agent-runtime";
 import { runPiAiSdkCall } from "@/lib/agent-runtime/pi/ai-sdk-compat";
@@ -713,6 +714,7 @@ export async function runModelCall(
     totalTokens: 0,
   };
   let turnsObserved = 0;
+  const trace = await beginLangfuseCall(db, input.tenantId, input.workbenchRunId).catch(() => null);
   try {
     input.abortSignal?.throwIfAborted();
     const toolsForCall = guardServiceTools(prefix.tools);
@@ -752,11 +754,10 @@ export async function runModelCall(
       ...(input.steering ? { steering: input.steering } : {}),
       shouldStopAfterTurn: async (stopInput: RuntimeStopInput) => {
         turnsObserved += 1;
-        cumulativeUsage.inputTokens += stopInput.usage.inputTokens;
-        cumulativeUsage.outputTokens += stopInput.usage.outputTokens;
-        cumulativeUsage.cacheReadTokens += stopInput.usage.cacheReadTokens;
-        cumulativeUsage.cacheWriteTokens += stopInput.usage.cacheWriteTokens;
-        cumulativeUsage.totalTokens += stopInput.usage.totalTokens;
+        // AgentRuntime reports the cumulative snapshot for THIS call, not a
+        // per-turn delta. Adding it double-counts prior turns, over-bills and
+        // can stop a multi-step task before it submits its final result.
+        Object.assign(cumulativeUsage, stopInput.usage);
         if (!input.shouldStopAfterTurn) return false;
         return (
           (await input.shouldStopAfterTurn({
@@ -766,10 +767,14 @@ export async function runModelCall(
           })) ?? false
         );
       },
+      ...(trace ? { onObservation: trace.onObservation } : {}),
       ...(input.onEvent ? { onEvent: input.onEvent } : {}),
       runtime: deps.runtime ?? createAgentRuntime(),
     });
   } catch (err) {
+    await trace?.finish(input.abortSignal?.aborted ? "cancelled" : "error").catch(() => {
+      deps.log?.warn("optional_trace_enqueue_failed", { code: "langfuse_outbox_failed" });
+    });
     // ─── A LINHA QUE FALTAVA ────────────────────────────────────────────────
     //
     // Até aqui o INSERT em llm_calls vivia só DEPOIS desta chamada, sem `try`
@@ -804,6 +809,9 @@ export async function runModelCall(
     });
     throw err;
   }
+  await trace?.finish(input.abortSignal?.aborted ? "cancelled" : "ok").catch(() => {
+    deps.log?.warn("optional_trace_enqueue_failed", { code: "langfuse_outbox_failed" });
+  });
   const latencyMs = Date.now() - startedAt;
 
   const usageFromResult = {

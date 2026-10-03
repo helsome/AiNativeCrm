@@ -114,7 +114,7 @@ describe("LLM Agent semantic judge adapter", () => {
       verdict: "needs_review",
       score: 72,
       rubricRevision: WORKBENCH_SEMANTIC_RUBRIC_REVISION,
-      judgeId: "workbench_semantic_v1:provider-1:model-1",
+      judgeId: "workbench_semantic_v2:provider-1:model-1",
     });
     expect(mockedRunModelCall).toHaveBeenCalledWith(
       expect.anything(),

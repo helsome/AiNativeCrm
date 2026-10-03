@@ -81,7 +81,12 @@ function renderWorkbench(withLead = true) {
   return userEvent.setup();
 }
 
+async function openSettings(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: "任务设置" }));
+}
+
 async function submit(user: ReturnType<typeof userEvent.setup>) {
+  if (screen.queryByRole("dialog")) await user.keyboard("{Escape}");
   await user.type(screen.getByPlaceholderText(taskPlaceholder), task);
   await user.click(screen.getByRole("button", { name: "运行 Agent" }));
   await waitFor(() => expect(submissions).toHaveLength(1));
@@ -110,6 +115,7 @@ describe("Workbench delegation follows the visible mode and CRM object", () => {
 
   it("runs normally after clearing the delegated lead", async () => {
     const user = renderWorkbench();
+    await openSettings(user);
     await user.click(screen.getByRole("button", { name: "清除" }));
     expect(screen.queryByLabelText(missionLabel)).not.toBeInTheDocument();
     const body = await submit(user);
@@ -120,6 +126,7 @@ describe("Workbench delegation follows the visible mode and CRM object", () => {
 
   it("runs normally after changing from a lead to a contact", async () => {
     const user = renderWorkbench();
+    await openSettings(user);
     await user.selectOptions(screen.getByLabelText("CRM 对象类型"), "contact");
     await user.click(await screen.findByRole("button", { name: "联系人一" }));
     const body = await submit(user);
@@ -131,6 +138,7 @@ describe("Workbench delegation follows the visible mode and CRM object", () => {
     const user = renderWorkbench();
     await user.selectOptions(screen.getByLabelText("执行模式"), "inspect");
     await user.selectOptions(screen.getByLabelText("执行模式"), "act");
+    await openSettings(user);
     expect(screen.getByLabelText(missionLabel)).not.toBeChecked();
     expect(screen.queryByLabelText("业务验收条件")).not.toBeInTheDocument();
     expect(await submit(user)).not.toHaveProperty("mission");
@@ -138,6 +146,7 @@ describe("Workbench delegation follows the visible mode and CRM object", () => {
 
   it("does not silently delegate another lead after clearing the original", async () => {
     const user = renderWorkbench();
+    await openSettings(user);
     await user.click(screen.getByRole("button", { name: "清除" }));
     await user.click(await screen.findByRole("button", { name: "商机二" }));
     expect(screen.getByLabelText(missionLabel)).not.toBeChecked();
@@ -148,12 +157,15 @@ describe("Workbench delegation follows the visible mode and CRM object", () => {
 
   it("still requires acceptance criteria for an explicitly delegated mission", async () => {
     const user = renderWorkbench();
+    await openSettings(user);
     expect(screen.getByLabelText(missionLabel)).toBeChecked();
+    await user.keyboard("{Escape}");
     await user.type(screen.getByPlaceholderText(taskPlaceholder), task);
     await user.click(screen.getByRole("button", { name: "运行 Agent" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("填写业务验收条件");
+    expect(screen.getByRole("dialog")).toHaveTextContent("填写业务验收条件");
     expect(submissions).toHaveLength(0);
     await user.type(screen.getByLabelText("业务验收条件"), "客户确认下一步");
+    await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "运行 Agent" }));
     await waitFor(() => expect(submissions).toHaveLength(1));
     await waitFor(() => expect(screen.getByPlaceholderText(taskPlaceholder)).toHaveValue(""));
@@ -166,6 +178,7 @@ describe("Workbench delegation follows the visible mode and CRM object", () => {
 
   it("keeps ordinary lead execution available when delegation is unchecked", async () => {
     const user = renderWorkbench();
+    await openSettings(user);
     await user.click(screen.getByLabelText(missionLabel));
     expect(await submit(user)).not.toHaveProperty("mission");
   });

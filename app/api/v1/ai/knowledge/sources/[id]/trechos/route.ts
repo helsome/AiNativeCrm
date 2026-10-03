@@ -16,6 +16,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import { ok, fail } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
 import { createClient } from "@/lib/supabase/server";
@@ -27,11 +28,19 @@ export const dynamic = "force-dynamic";
 const TETO = 200;
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const requestId = randomUUID();
   const { id: sourceId } = await params;
+  const query = new URL(req.url).searchParams;
+  const parsed = z.object({
+    sourceId: z.string().uuid(),
+    versionId: z.string().uuid().optional(),
+    chunkId: z.string().uuid().optional(),
+  }).safeParse({ sourceId, versionId: query.get("version_id") ?? undefined,
+    chunkId: query.get("chunk_id") ?? undefined });
+  if (!parsed.success) return fail("invalid_request", "Referência de conhecimento inválida.", 400, { requestId });
 
   const authz = await requireRole("manager", { requestId, resource: "ai_knowledge" });
   if (!authz.ok) return authz.response;
@@ -42,7 +51,7 @@ export async function GET(
 
   const { data: fonte, error: fonteErr } = await supabase
     .from("ai_knowledge_sources")
-    .select("id, name, active_kb_version_id, chunks_count")
+    .select("id, name, active_kb_version_id, chunks_count, is_active")
     .eq("id", sourceId)
     .eq("organization_id", activeOrg.orgId)
     .maybeSingle();
@@ -54,22 +63,28 @@ export async function GET(
   if (!fonte) {
     return fail("not_found", t("Material não encontrado."), 404, { requestId });
   }
+  // Historical locators must not revive access to an archived source.
+  if (parsed.data.versionId && !fonte.is_active)
+    return fail("not_found", t("Material não encontrado."), 404, { requestId });
 
   const versaoAtiva = (fonte as { active_kb_version_id: string | null }).active_kb_version_id;
-  if (!versaoAtiva) {
+  const versao = parsed.data.versionId ?? versaoAtiva;
+  if (!versao) {
     // Não é erro: é o estado de quem ainda não foi preparado. Devolver 404 aqui
     // faria a tela dizer "não encontrado" para um material que existe.
     return ok({ nome: (fonte as { name: string }).name, trechos: [], total: 0 }, { requestId });
   }
 
-  const { data: trechos, error: trechosErr } = await supabase
+  let chunksQuery = supabase
     .from("ai_chunks")
-    .select("id, position, content, token_count, metadata")
+    .select("id, kb_version_id, position, content, content_hash, token_count, metadata")
     .eq("organization_id", activeOrg.orgId)
     .eq("knowledge_source_id", sourceId)
-    .eq("kb_version_id", versaoAtiva)
+    .eq("kb_version_id", versao)
     .order("position", { ascending: true })
     .limit(TETO);
+  if (parsed.data.chunkId) chunksQuery = chunksQuery.eq("id", parsed.data.chunkId);
+  const { data: trechos, error: trechosErr } = await chunksQuery;
 
   if (trechosErr) {
     console.error("[conhecimento-trechos] leitura dos trechos falhou:", trechosErr.message);
@@ -79,8 +94,11 @@ export async function GET(
   return ok(
     {
       nome: (fonte as { name: string }).name,
+      index_version_id: versao,
+      is_current_index: versao === versaoAtiva,
       trechos: trechos ?? [],
-      total: (fonte as { chunks_count: number }).chunks_count ?? (trechos ?? []).length,
+      total: parsed.data.versionId || parsed.data.chunkId ? (trechos ?? []).length
+        : (fonte as { chunks_count: number }).chunks_count ?? (trechos ?? []).length,
       truncado: (trechos ?? []).length >= TETO,
     },
     { requestId },

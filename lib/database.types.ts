@@ -28,6 +28,123 @@ export type Database = {
   };
   public: {
     Tables: {
+      ai_integration_settings: {
+        Row: {
+          organization_id: string;
+          provider: string;
+          enabled: boolean;
+          revision: number;
+          updated_at: string;
+        };
+        Insert: {
+          organization_id: string;
+          provider: string;
+          enabled?: boolean;
+          revision?: number;
+          updated_at?: string;
+        };
+        Update: {
+          organization_id?: string;
+          provider?: string;
+          enabled?: boolean;
+          revision?: number;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+
+      ai_customer_memories: {
+        Row: {
+          id: string;
+          organization_id: string;
+          contact_id: string | null;
+          subject_key: string;
+          request_key: string;
+          category: string;
+          body: string;
+          content_hash: string;
+          confirmed_by: string | null;
+          sync_state: string;
+          external_id: string | null;
+          write_started_at: string | null;
+          write_outcome: string;
+          deleted_at: string | null;
+          remote_deleted_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          contact_id?: string | null;
+          subject_key: string;
+          request_key: string;
+          category: string;
+          body: string;
+          content_hash: string;
+          confirmed_by?: string | null;
+          sync_state?: string;
+          external_id?: string | null;
+          write_started_at?: string | null;
+          write_outcome?: string;
+          deleted_at?: string | null;
+          remote_deleted_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          contact_id?: string | null;
+          subject_key?: string;
+          request_key?: string;
+          category?: string;
+          body?: string;
+          content_hash?: string;
+          confirmed_by?: string | null;
+          sync_state?: string;
+          external_id?: string | null;
+          write_started_at?: string | null;
+          write_outcome?: string;
+          deleted_at?: string | null;
+          remote_deleted_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+
+      ai_wiki_evidence: {
+        Row: {
+          id: string;
+          organization_id: string;
+          source_id: string;
+          manifest_hash: string;
+          manifest: Json;
+          content: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          source_id: string;
+          manifest_hash: string;
+          manifest: Json;
+          content: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          source_id?: string;
+          manifest_hash?: string;
+          manifest?: Json;
+          content?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+
       channel_integrations: {
         Row: {
           organization_id: string;

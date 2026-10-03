@@ -23,6 +23,7 @@ import * as path from "node:path";
 import { expect, type Page } from "@playwright/test";
 
 import { generateTotp, msUntilNextTotpWindow } from "../utils/totp";
+import { isAppUrl } from "../utils/app-url";
 
 const CREDS_PATH = path.join(process.cwd(), ".e2e-creds.json");
 
@@ -87,7 +88,7 @@ async function tentarMfa(page: Page, secret: string, tentativas: number): Promis
     await digito.click();
     await page.keyboard.type(codigo, { delay: 40 });
     try {
-      await page.waitForURL(/\/app\//, { timeout: 10_000 });
+      await page.waitForURL(isAppUrl, { timeout: 10_000 });
       return true;
     } catch {
       await page.waitForTimeout(msUntilNextTotpWindow() + 300);

@@ -32,6 +32,12 @@ export default defineConfig([
     },
   },
   {
+    // Isolated buildless example: its Node harnesses and the browser/Node engine
+    // deliberately use CommonJS. Production application rules stay unchanged.
+    files: ["examples/chat-first-demo/tests/**/*.cjs", "examples/chat-first-demo/dist/demo-engine.js"],
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
+  {
     // Script CLI do gov-loop (roda via tsx, fora do bundle) — require() ok.
     files: ["loop/**/*.ts"],
     rules: { "@typescript-eslint/no-require-imports": "off" },

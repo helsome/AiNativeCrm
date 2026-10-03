@@ -441,7 +441,7 @@ it("HTTP controlado: POST pending, polling GET, success/failure/unknown e convit
     expect(writes).toHaveLength(1);
     // Nova fixture de intenção existente: falha explícita não vira ready nem outro POST.
     await pool.query(
-      "update calendar_appointments set meeting_state='pending',meeting_next_attempt_at=now() where id=$1",
+      "update calendar_appointments set meeting_state='pending',meeting_next_attempt_at=now()-interval '1 second' where id=$1",
       [f.id],
     );
     remote = {
@@ -458,6 +458,7 @@ it("HTTP controlado: POST pending, polling GET, success/failure/unknown e convit
     const retry = await row(f.id);
     expect(retry.meeting_request_id).not.toBe(a.meeting_request_id);
     // O GET de failure antigo não é recibo da nova intenção.
+    await due(); // A past-due fixture must not depend on Node/VM clock skew.
     await reconcileAppointment(db, f.org, f.id, options);
     expect(writes).toHaveLength(2);
     expect(writes[1]!.method).toBe("PATCH");
@@ -1030,7 +1031,7 @@ it("dois executores Google: busy e reclaim cercam resposta antiga sem segundo PO
     await reached;
     expect(await reconcileAppointment(db.client, f.org, f.id, options)).toBe("busy");
     await pool.query(
-      "update calendar_appointments set google_claim_until=now()-interval '1 second' where id=$1",
+      "update calendar_appointments set google_claim_until=now()-interval '1 second',meeting_next_attempt_at=now()-interval '1 second' where id=$1",
       [f.id],
     );
     expect(await reconcileAppointment(db.client, f.org, f.id, options)).toBe("processed");

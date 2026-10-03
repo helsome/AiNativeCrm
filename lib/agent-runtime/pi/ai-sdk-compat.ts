@@ -242,6 +242,7 @@ export interface PiAiSdkCallInput {
   afterToolCall?: AgentTurnInput["afterToolCall"];
   steering?: AgentTurnInput["steering"];
   shouldStopAfterTurn?: AgentTurnInput["shouldStopAfterTurn"];
+  onObservation?: AgentTurnInput["onObservation"];
   onEvent?: (event: AgentRuntimeEvent) => void | Promise<void>;
 }
 
@@ -280,6 +281,7 @@ export async function runPiAiSdkCall(input: PiAiSdkCallInput) {
         : {}),
     ...(input.afterToolCall ? { afterToolCall: input.afterToolCall } : {}),
     ...(input.steering ? { steering: input.steering } : {}),
+    ...(input.onObservation ? { onObservation: input.onObservation } : {}),
     ...(input.onEvent ? { onEvent: input.onEvent } : {}),
     ...(input.shouldStopAfterTurn ? { shouldStopAfterTurn: input.shouldStopAfterTurn } : {}),
   });

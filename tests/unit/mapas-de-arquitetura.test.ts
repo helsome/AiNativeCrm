@@ -214,6 +214,8 @@ describe("o mapa do turno conhece todos os turnos", () => {
   const NAO_SAO_TURNO: Record<string, string> = {
     watchdog: "vigia sessões e não roda modelo — não é turno de agente",
     flywheel: "ciclo de auto-aprimoramento, tem mapa próprio (flywheel)",
+    internal_im_event: "consome callback IM já autenticado e registra fato/retoma Mission; não executa modelo, descrito em internal-collaboration-feishu.md",
+    internal_im_question: "entrega pergunta autorizada por transporte IM com lease/idempotência; não é um turno de modelo",
   };
 
   it("cada kind de turno aparece como peça ou tag do mapa do turno", () => {

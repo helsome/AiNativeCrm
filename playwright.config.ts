@@ -145,6 +145,9 @@ export default defineConfig({
   retries: 0,
   use: {
     baseURL: BASE_URL,
+    // These legacy scenarios assert Portuguese copy; choose that locale
+    // explicitly instead of relying on the product's Chinese default.
+    locale: "pt-BR",
     // ⚠️ Era `on-first-retry`, e com `retries: 0` logo acima isso significa
     // **trace nunca gravado**. As duas linhas estão certas isoladamente e
     // erradas juntas: uma diz "só no retry", a outra diz "não há retry".

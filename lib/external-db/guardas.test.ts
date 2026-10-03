@@ -1,4 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("node:dns/promises", () => {
+  const lookup = vi.fn(async (hostname: string) => {
+    if (hostname === "localhost") return [{ address: "127.0.0.1", family: 4 }];
+    if (hostname === "public.example") return [{ address: "93.184.216.34", family: 4 }];
+    throw new Error("ENOTFOUND");
+  });
+  return { lookup, default: { lookup } };
+});
 
 import { ipDeBancoProibido, validarHostDeBanco } from "./guardas";
 
@@ -70,8 +79,14 @@ describe("validarHostDeBanco", () => {
   });
 
   it("aceita literal de IP público e IP de LAN", async () => {
-    await expect(validarHostDeBanco("8.8.8.8")).resolves.toEqual({ ok: true, enderecos: ["8.8.8.8"] });
-    await expect(validarHostDeBanco("10.0.0.7")).resolves.toEqual({ ok: true, enderecos: ["10.0.0.7"] });
+    await expect(validarHostDeBanco("8.8.8.8")).resolves.toEqual({
+      ok: true,
+      enderecos: ["8.8.8.8"],
+    });
+    await expect(validarHostDeBanco("10.0.0.7")).resolves.toEqual({
+      ok: true,
+      enderecos: ["10.0.0.7"],
+    });
   });
 
   it("aceita IPv6 literal entre colchetes", async () => {
@@ -88,10 +103,16 @@ describe("validarHostDeBanco", () => {
   });
 
   it("falha fechado quando o DNS não resolve", async () => {
-    // `.invalid` é reservado por RFC 2606 e nunca resolve — sem rede no teste.
+    // Explicit failed resolution: VPN/fake-IP DNS can resolve even `.invalid`.
     await expect(validarHostDeBanco("db.invalid")).resolves.toEqual({
       ok: false,
       motivo: "dns_falhou",
+    });
+  });
+  it("hostname público resolvido passa (controle positivo)", async () => {
+    await expect(validarHostDeBanco("public.example")).resolves.toEqual({
+      ok: true,
+      enderecos: ["93.184.216.34"],
     });
   });
 });

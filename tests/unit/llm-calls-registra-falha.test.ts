@@ -67,6 +67,55 @@ const cfg = {
   runtimeMode: "pi" as const,
 };
 
+describe("Pi cumulative usage budget contract", () => {
+  it("does not add cumulative snapshots again, records accurate usage and still stops at the real limit", async () => {
+    const { pool, inserts } = poolQueGrava();
+    const snapshots: number[] = [];
+    const runtime: AgentRuntime = {
+      run: async (input) => {
+        const usage = (total: number) => ({
+          inputTokens: total - 10,
+          outputTokens: 10,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          totalTokens: total,
+        });
+        for (const [index, total] of [100, 200, 300].entries()) {
+          const stop = await input.shouldStopAfterTurn?.({
+            message: { role: "assistant", content: "observed" },
+            turn: index + 1,
+            usage: usage(total),
+          });
+          expect(stop).toBe(total === 300);
+        }
+        return {
+          messages: [{ role: "assistant", content: "finished" }],
+          finalText: "finished",
+          usage: usage(300),
+          events: [],
+          toolCalls: [],
+        };
+      },
+    };
+    const call = await runModelCall(
+      pool,
+      cfg,
+      {
+        tenantId: ORG,
+        messages: [{ role: "user", content: "read and summarize" }],
+        shouldStopAfterTurn: ({ cumulativeUsage }) => {
+          snapshots.push(cumulativeUsage.totalTokens);
+          return cumulativeUsage.totalTokens >= 300;
+        },
+      },
+      { runtime },
+    );
+    expect(snapshots).toEqual([100, 200, 300]);
+    expect(call.usage).toMatchObject({ inputTokens: 290, outputTokens: 10 });
+    expect(inserts[0]!.params.slice(8, 12)).toEqual([290, 10, 0, 0]);
+  });
+});
+
 async function chamarComErro(erro: unknown) {
   const { pool, inserts } = poolQueGrava();
   let lancou: unknown = null;

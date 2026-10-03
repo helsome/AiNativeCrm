@@ -1,5 +1,6 @@
 "use client";
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { TopBar } from "@/components/shell/TopBar";
 import { BarraDeProgressoNavegacao } from "@/components/shell/BarraDeProgressoNavegacao";
@@ -25,7 +26,54 @@ interface AppShellProps {
   children: ReactNode;
 }
 
-export function AppShell({ sidebarCollapsed, demoMode = false, podeAtender, children }: AppShellProps) {
+export function AppShell({
+  sidebarCollapsed,
+  demoMode = false,
+  podeAtender,
+  children,
+}: AppShellProps) {
+  const chatFirst = usePathname() === "/app/ai/workbench";
+  const shellRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!chatFirst) return;
+    const shell = shellRef.current;
+    if (!shell) return;
+    // Use the actual available viewport, including software-keyboard resize and
+    // banners above the shell. All other routes retain their page-scroll layout.
+    const measure = () => {
+      const viewport = window.visualViewport;
+      const bottom = viewport ? viewport.height + viewport.offsetTop : window.innerHeight;
+      shell.style.setProperty(
+        "--workbench-viewport-height",
+        `${Math.max(0, bottom - shell.getBoundingClientRect().top)}px`,
+      );
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    window.visualViewport?.addEventListener("resize", measure);
+    window.visualViewport?.addEventListener("scroll", measure);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    // The branding parent uses display:contents, so observe its actual banner
+    // children, not its nonexistent box. They can change height after hydration.
+    const observeBanners = () => {
+      if (!shell.parentElement) return;
+      for (const sibling of shell.parentElement.children) {
+        if (sibling !== shell) observer?.observe(sibling);
+      }
+      measure();
+    };
+    observeBanners();
+    const mutations = new MutationObserver(observeBanners);
+    if (shell.parentElement) mutations.observe(shell.parentElement, { childList: true });
+    return () => {
+      window.removeEventListener("resize", measure);
+      window.visualViewport?.removeEventListener("resize", measure);
+      window.visualViewport?.removeEventListener("scroll", measure);
+      observer?.disconnect();
+      mutations.disconnect();
+      shell.style.removeProperty("--workbench-viewport-height");
+    };
+  }, [chatFirst]);
   useInboundMessageAlerts();
   useInboundCallAlerts();
   useCrmAlerts();
@@ -41,9 +89,21 @@ export function AppShell({ sidebarCollapsed, demoMode = false, podeAtender, chil
   // decide a faixa que o conteúdo perde, e ninguém mais mede isso por fora.
   const ocupacaoDoRodape = useOcupacaoDoRodape();
   return (
-    <div className="flex min-h-screen w-full bg-background">
+    <div
+      ref={shellRef}
+      data-chat-first={chatFirst || undefined}
+      className={
+        chatFirst
+          ? "flex h-[var(--workbench-viewport-height,100dvh)] min-h-0 w-full overflow-hidden bg-background"
+          : "flex min-h-screen w-full bg-background"
+      }
+    >
       <BarraDeProgressoNavegacao />
-      <div className="hidden md:block">
+      <div
+        className={
+          chatFirst ? "hidden min-h-0 overflow-hidden md:block [&>aside]:h-full" : "hidden md:block"
+        }
+      >
         <Sidebar collapsed={sidebarCollapsed} />
       </div>
       {/*
@@ -65,10 +125,22 @@ export function AppShell({ sidebarCollapsed, demoMode = false, podeAtender, chil
         SEGUNDA medida da mesma coisa — a que discordava e deixava a barra por
         cima da lista.
       */}
-      <div className="flex min-h-screen min-w-0 flex-1 flex-col">
-        <TopBar />
+      <div
+        className={
+          chatFirst
+            ? "flex min-h-0 min-w-0 flex-1 flex-col"
+            : "flex min-h-screen min-w-0 flex-1 flex-col"
+        }
+      >
+        {chatFirst ? (
+          <div className="shrink-0">
+            <TopBar />
+          </div>
+        ) : (
+          <TopBar />
+        )}
         {demoMode ? (
-          <div className="border-b border-accent/30 bg-accent-soft px-6 py-2 text-center text-xs text-foreground">
+          <div className="shrink-0 border-b border-accent/30 bg-accent-soft px-6 py-2 text-center text-xs text-foreground">
             演示模式 · 当前使用演示账号和示例数据，所有修改仅用于本地体验
           </div>
         ) : null}
@@ -83,7 +155,9 @@ export function AppShell({ sidebarCollapsed, demoMode = false, podeAtender, chil
           aparece no inspetor quando alguém pergunta quanto o rodapé perdeu.
         */}
         <main
-          className="flex-1 overflow-auto p-6"
+          className={
+            chatFirst ? "min-h-0 flex-1 overflow-hidden p-2 md:p-4" : "flex-1 overflow-auto p-6"
+          }
           style={estiloDaReserva(ocupacaoDoRodape)}
           data-rodape-ocupado={ocupacaoDoRodape}
         >

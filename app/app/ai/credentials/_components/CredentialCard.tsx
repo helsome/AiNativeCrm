@@ -91,6 +91,12 @@ export function CredentialCard({ credential, canWrite, usageCount }: Props) {
     startTransition(async () => {
       try {
         await apiClient.delete(`/api/v1/ai/credentials/${credential.id}`);
+        // Remove only after the server acknowledges DELETE. Do not make the
+        // operator wait for another GET, or let an older GET resurrect the row.
+        await qc.cancelQueries({ queryKey: credentialsListQueryKey });
+        qc.setQueryData<CredentialRow[]>(credentialsListQueryKey, (previous = []) =>
+          previous.filter((row) => row.id !== credential.id),
+        );
         toast.success(t("Credencial removida."));
         setDeleteOpen(false);
         await qc.invalidateQueries({ queryKey: credentialsListQueryKey });

@@ -49,6 +49,8 @@ export interface HandlerResult {
 }
 
 export interface EventHandler {
+  /** Optional vendor work never shares the foreground business drain. */
+  lane?: "business" | "integration";
   /** Stable key recorded in `event_log.consumed_by`. */
   key: string;
   /** Event types this handler consumes (`["message.received", "message.sent"]`). */

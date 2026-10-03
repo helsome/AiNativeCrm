@@ -32,15 +32,16 @@ function adminStub(atualizacoes: Record<string, unknown>[]) {
         const query = {
           eq: () => query,
           maybeSingle: async () => ({
-            data: table === "ai_agents"
-              ? { origin: "user" }
-              : {
-                  id: VERSION,
-                  status: "draft",
-                  agent_id: AGENT,
-                  organization_id: ORG,
-                  followup: followupExistente,
-                },
+            data:
+              table === "ai_agents"
+                ? { origin: "user" }
+                : {
+                    id: VERSION,
+                    status: "draft",
+                    agent_id: AGENT,
+                    organization_id: ORG,
+                    followup: followupExistente,
+                  },
             error: null,
           }),
         };
@@ -113,5 +114,20 @@ describe("PATCH .../versions/:vid — atualização parcial", () => {
         },
       },
     ]);
+  });
+
+  it.each([[FLOW], []])("persists the explicit knowledge source selection %j", async (...args) => {
+    const sources = args[0] === undefined ? [] : args;
+    const { PATCH } = await import("./route");
+    const response = await PATCH(
+      new NextRequest("http://localhost/api/v1/ai/agents/x/versions/y", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ knowledge_source_ids: sources }),
+      }),
+      { params: Promise.resolve({ id: AGENT, vid: VERSION }) },
+    );
+    expect(response.status).toBe(200);
+    expect(atualizacoes).toEqual([{ knowledge_source_ids: sources }]);
   });
 });

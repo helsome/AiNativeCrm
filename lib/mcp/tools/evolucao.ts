@@ -1,3 +1,6 @@
+import { searchCompanyWiki } from "@/lib/ai/integrations/weknora";
+import { integrationBinding } from "@/lib/ai/integrations/config";
+import { getRequestPool } from "@/lib/agent-engine/db/request-pool";
 /**
  * Capacidades do pacote "Aprender e evoluir" — o acervo da empresa e a memoria
  * da organizacao.
@@ -14,6 +17,7 @@
 import { z } from "zod";
 
 import { buscarConhecimento, resolverAcervoDoAgente } from "@/lib/ai/knowledge/busca";
+import { loadOrgMemoryFromSupabase, orgMemoryEvidence } from "@/lib/agent-engine/agent/org-memory";
 import type { McpToolDefinition } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -82,17 +86,22 @@ export const crmSearchKnowledge: McpToolDefinition<typeof buscarInputShape> = {
       };
     }
 
-    const resultado = await buscarConhecimento(ctx.supabase, {
+    const wiki = integrationBinding(ctx.organizationId, "weknora")
+      ? await searchCompanyWiki(getRequestPool(), ctx.organizationId, fontes, input.pergunta, input.quantidade)
+        .catch(() => ({ evidence: [], status: "unavailable", handledSourceIds: [] as string[] }))
+      : { evidence: [], status: "disabled", handledSourceIds: [] as string[] };
+    const localSources = fontes.filter((sourceId) => !wiki.handledSourceIds.includes(sourceId));
+    const resultado = localSources.length ? await buscarConhecimento(ctx.supabase, {
       organizationId: ctx.organizationId,
-      knowledgeSourceIds: fontes,
+      knowledgeSourceIds: localSources,
       pergunta: input.pergunta,
       topK: input.quantidade,
       limiar: LIMIAR_PADRAO,
-    });
+    }) : { trechos: [], melhorSimilaridade: null };
 
     return {
       trechos: resultado.trechos,
-      evidence: resultado.trechos.map((trecho) => ({
+      evidence: [...wiki.evidence, ...resultado.trechos.map((trecho) => ({
         id: trecho.chunk_id,
         namespace: "organization_wiki",
         kind: trecho.metadata?.source_type === "wiki" ? "wiki_page" : "document",
@@ -102,11 +111,21 @@ export const crmSearchKnowledge: McpToolDefinition<typeof buscarInputShape> = {
         locator: {
           provider: "local_pgvector",
           sourceId: trecho.knowledge_source_id ?? "legacy_knowledge_source",
+          ...(trecho.index_version_id ? { revision: trecho.index_version_id } : {}),
+          ...(trecho.knowledge_source_id && trecho.index_version_id ? {
+            uri: `/api/v1/ai/knowledge/sources/${trecho.knowledge_source_id}/trechos?version_id=${trecho.index_version_id}&chunk_id=${trecho.chunk_id}`,
+          } : {}),
         },
-        ...(trecho.metadata ? { metadata: trecho.metadata } : {}),
-      })),
+        metadata: {
+          ...trecho.metadata,
+          revision_kind: "index_version",
+          ...(trecho.position !== undefined ? { position: trecho.position } : {}),
+          ...(trecho.content_hash ? { content_hash: trecho.content_hash } : {}),
+        },
+      }))],
       retrieval: {
-        status: resultado.trechos.length > 0 ? "complete" : "empty",
+        wiki_status: wiki.status,
+        status: resultado.trechos.length > 0 || wiki.evidence.length > 0 ? "complete" : "empty",
         namespace: "organization_wiki",
         missing: [],
       },
@@ -195,22 +214,26 @@ export const crmGetOrgMemory: McpToolDefinition<typeof lerMemoriaInputShape> = {
   name: "crm_get_org_memory",
   description:
     "Lê o que a empresa registrou sobre si mesma — políticas, combinados e aprendizados que " +
-    "valem para todo atendimento. Use antes de inventar regra de negócio.",
+    "valem para todo atendimento. Inclui documento publicado, revisão e aprendizados ativos. " +
+    "Use antes de inventar regra de negócio; limite restringe apenas a lista legada anotacoes.",
   inputSchema: lerMemoriaInputShape,
   category: "read",
   requiresRole: "agent",
   requiresScope: "mcp:read",
   handler: async (input, ctx) => {
-    const { data, error } = await ctx.supabase
-      .from("org_memory_entries")
-      .select("id, title, body, source, status, created_at, updated_at")
-      .eq("organization_id", ctx.organizationId)
-      .eq("status", "active")
-      .order("updated_at", { ascending: false })
-      .limit(input.limite);
-
-    if (error) throw new Error(`ler_memoria_falhou: ${error.message}`);
-    return { anotacoes: data ?? [] };
+    const memory = await loadOrgMemoryFromSupabase(ctx.supabase, ctx.organizationId);
+    // Compatibilidade: anotacoes mantém campos/limite/ordem legados. A memória
+    // canônica completa é idêntica à injetada no inbound e no Workbench.
+    const anotacoes = [...memory.entries]
+      .sort((left, right) => right.updated_at.localeCompare(left.updated_at) || left.id.localeCompare(right.id))
+      .slice(0, input.limite);
+    return {
+      anotacoes, memory, evidence: orgMemoryEvidence(memory),
+      retrieval: {
+        status: memory.document || memory.entries.length ? "complete" : "empty",
+        namespace: "organization_memory", missing: [],
+      },
+    };
   },
 };
 

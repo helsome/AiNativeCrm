@@ -29,9 +29,9 @@ const despachados: unknown[] = [];
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({
     from: () => ({
-      insert: async (linha: Record<string, unknown>) => {
+      insert: (linha: Record<string, unknown>) => {
         arquivados.push(linha);
-        return { error: null };
+        return { select: () => ({ maybeSingle: async () => ({ data: { id: "receipt" }, error: null }) }) };
       },
     }),
     rpc: async () => ({ data: "segredo-decifrado-longo", error: null }),

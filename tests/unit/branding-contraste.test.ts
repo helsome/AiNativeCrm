@@ -7,7 +7,6 @@ import {
   LIMIAR_ACROMATICO,
   PISOS,
   PISO_DE_CROMA,
-  PISO_DE_SEPARACAO_DO_NEUTRO,
   PISO_DE_SEPARACAO_SIMULADA,
   ROTACAO_MAXIMA,
   deltaESimulado,
@@ -18,7 +17,6 @@ import {
   melhorFrenteSobre,
   razaoDeContraste,
   reconciliarSemanticas,
-  separacaoDoNeutro,
   simularDicromacia,
   superficiesDoTema,
 } from "@/lib/branding/contraste";
@@ -50,16 +48,30 @@ const rampaChapada = (hex: string): Rampa =>
  *  `#934531` — o Clay da interface: controle positivo para os pares do produto.
  */
 const FIXTURE = [
-  "#0f172a", "#f5c518", "#ffffff", "#000000", "#808080", "#dc2626", "#22c55e", "#f59e0b",
-  "#2563eb", "#14b8a6", "#4b0082", "#e11d48", "#7c3aed", "#1a1f36", "#fafafa", "#934531",
+  "#0f172a",
+  "#f5c518",
+  "#ffffff",
+  "#000000",
+  "#808080",
+  "#dc2626",
+  "#22c55e",
+  "#f59e0b",
+  "#2563eb",
+  "#14b8a6",
+  "#4b0082",
+  "#e11d48",
+  "#7c3aed",
+  "#1a1f36",
+  "#fafafa",
+  "#934531",
 ] as const;
 
 describe("extrairRegua — os pares saem do globals.css, nunca de lista à mão", () => {
   it("acha os dois temas, a rampa do produto e os neutros", () => {
     expect(REGUA.rampaDoProduto).toHaveLength(11);
-    expect(REGUA.rampaDoProduto[6]).toBe("#934531");
+    expect(REGUA.rampaDoProduto[6]).toBe("#1d1d1f");
     expect(REGUA.claro.neutros).toHaveLength(11);
-    expect(REGUA.escuro.neutros[9]).toBe("#13110f");
+    expect(REGUA.escuro.neutros[9]).toBe("#18181a");
     expect(REGUA.claro.base.map((b) => b.chave)).toEqual([
       "--color-bg",
       "--color-surface",
@@ -118,12 +130,12 @@ describe("extrairRegua — os pares saem do globals.css, nunca de lista à mão"
     const razao = (papel: string, superficie: string) =>
       pares.find((p) => p.papel === papel && p.superficie === superficie)?.razao ?? 0;
 
-    expect(razao("--color-accent", "--color-bg")).toBeCloseTo(6.32, 2);
-    expect(razao(":focus-visible/outline", "--color-bg")).toBeCloseTo(4.53, 2);
-    expect(razao(":focus-visible/outline", "--color-surface-elevated")).toBeCloseTo(4.23, 2);
+    expect(razao("--color-accent", "--color-bg")).toBeCloseTo(15.84, 2);
+    expect(razao(":focus-visible/outline", "--color-bg")).toBeCloseTo(4.77, 2);
+    expect(razao(":focus-visible/outline", "--color-surface-elevated")).toBeCloseTo(4.53, 2);
   });
 
-  it("a paleta Clay inteira, como está no CSS, cabe nos pisos", () => {
+  it("a paleta neutra inteira, como está no CSS, cabe nos pisos", () => {
     for (const tema of [REGUA.claro, REGUA.escuro]) {
       const reprovas = medirPares(tema, REGUA.rampaDoProduto, 0).filter((p) => !p.passa);
       expect(reprovas, `${tema.nome}: ${JSON.stringify(reprovas)}`).toEqual([]);
@@ -164,17 +176,25 @@ describe("dicromacia — a régua de ângulo ordena INVERTIDO", () => {
     const cru = deltaEOklab(vermelho, verde);
     expect(cru).toBeGreaterThan(0.2);
     for (const tipo of DICROMACIAS) {
-      const simulado = deltaEOklab(simularDicromacia(vermelho, tipo), simularDicromacia(verde, tipo));
+      const simulado = deltaEOklab(
+        simularDicromacia(vermelho, tipo),
+        simularDicromacia(verde, tipo),
+      );
       expect(simulado, tipo).toBeLessThan(cru * 0.5);
     }
     // Sob deuteranopia o colapso é quase total — 0,0076 contra 0,2080 crus. Matriz
     // identidade (a sabotagem óbvia) devolveria 0,2080 e reprovaria aqui.
     expect(
-      deltaEOklab(simularDicromacia(vermelho, "deuteranopia"), simularDicromacia(verde, "deuteranopia")),
+      deltaEOklab(
+        simularDicromacia(vermelho, "deuteranopia"),
+        simularDicromacia(verde, "deuteranopia"),
+      ),
     ).toBeLessThan(cru * 0.1);
     // E NÃO colapsa o eixo azul-amarelo, que a dicromacia vermelho-verde preserva: uma
     // matriz que zerasse tudo também passaria no teste acima.
-    expect(deltaESimulado("#2563eb", "#f5c518")).toBeGreaterThan(deltaEOklab("#2563eb", "#f5c518") * 0.85);
+    expect(deltaESimulado("#2563eb", "#f5c518")).toBeGreaterThan(
+      deltaEOklab("#2563eb", "#f5c518") * 0.85,
+    );
   });
 
   it("usa o PIOR caso entre as dicromacias, não a média", () => {
@@ -208,7 +228,9 @@ describe("derivarMarca — as 16 sementes adversariais", () => {
         expect(
           reprovas,
           `${semente} · grau ${tema.grauDoAccent}: ` +
-            reprovas.map((r) => `${r.papel}×${r.superficie}=${r.razao.toFixed(2)}<${r.piso}`).join(", "),
+            reprovas
+              .map((r) => `${r.papel}×${r.superficie}=${r.razao.toFixed(2)}<${r.piso}`)
+              .join(", "),
         ).toEqual([]);
       }
     }
@@ -239,9 +261,8 @@ describe("derivarMarca — as 16 sementes adversariais", () => {
     // "ajustasse" o accent para folgar de uma semântica, este teste pega.
     for (const { semente, marca } of resultados) {
       if (marca.origemDaRampa !== "semente") continue;
-      const rampa = semente === REGUA.rampaDoProduto[6]
-        ? REGUA.rampaDoProduto
-        : rampaDeSemente(semente);
+      const rampa =
+        semente === REGUA.rampaDoProduto[6] ? REGUA.rampaDoProduto : rampaDeSemente(semente);
       expect(rampa, `${semente}`).toContain(marca.claro.accent);
       expect(rampa, `${semente}`).toContain(marca.escuro.accent);
       expect(marca.marca).toBe(semente);
@@ -318,7 +339,13 @@ describe("reconciliação — quem se move são as NOSSAS semânticas", () => {
 
   it("devolve sinal — e não distorção — quando não há rotação que resolva", () => {
     const result = reconciliarSemanticas(REGUA.rampaDoProduto[4], REGUA.escuro.semanticas);
-    expect(result.semSaida).toEqual([]);
+    // A neutral default deliberately removes chromatic distinction. When hue
+    // rotation cannot separate info from the dark action fill, the diagnostic
+    // remains visible and the semantic color is preserved, never silently distorted.
+    expect(result.semSaida.map((item) => item.nome)).toEqual(["info"]);
+    expect(result.cores.info).toBe(
+      REGUA.escuro.semanticas.find((item) => item.nome === "info")?.hex,
+    );
   });
 
   it("não inventa rotação impossível numa semântica sem croma", () => {
@@ -354,15 +381,16 @@ describe("reconciliação — quem se move são as NOSSAS semânticas", () => {
           const moveu = r.movimentos.some((m) => m.nome === s.nome);
           const semSaida = r.semSaida.some((x) => x.nome === s.nome);
           if (!moveu && !semSaida) {
-            expect(deltaESimulado(s.hex, tema.accent), `${semente} ${s.nome}`).toBeGreaterThanOrEqual(
-              PISO_DE_SEPARACAO_SIMULADA,
-            );
+            expect(
+              deltaESimulado(s.hex, tema.accent),
+              `${semente} ${s.nome}`,
+            ).toBeGreaterThanOrEqual(PISO_DE_SEPARACAO_SIMULADA);
           }
         }
       }
     }
     // Guarda de vacuidade do run inteiro para a paleta e as sementes atuais.
-    expect(movimentosNoRun).toBe(16);
+    expect(movimentosNoRun).toBe(12);
   });
 });
 
@@ -382,27 +410,17 @@ describe("marca acromática — o accent do produto permanece", () => {
     }
   });
 
-  it("o accent que permanece é cromático e separável do neutro do mesmo grau", () => {
+  it("o fallback neutro mantém os pisos de texto, ação e foco nas superfícies pintadas", () => {
     const marca = derivarMarca("#808080", REGUA);
-    for (const [tema, regua] of [
-      [marca.claro, REGUA.claro],
-      [marca.escuro, REGUA.escuro],
-    ] as const) {
-      expect(hexParaOklch(tema.accent).C).toBeGreaterThanOrEqual(PISO_DE_CROMA);
-      expect(
-        separacaoDoNeutro(regua, tema.grauDoAccent, tema.accent),
-      ).toBeGreaterThanOrEqual(PISO_DE_SEPARACAO_DO_NEUTRO);
+    // Chroma is no longer the product's distinction: shape, labels and contrast
+    // identify controls. Custom chromatic brand derivation remains covered above.
+    expect(marca.rampa).toEqual(REGUA.rampaDoProduto);
+    for (const tema of [marca.claro, marca.escuro]) {
+      expect(tema.pares.length).toBeGreaterThanOrEqual(18);
+      expect(tema.pares.filter((pair) => !pair.passa)).toEqual([]);
+      expect(tema.pares.some((pair) => pair.papel.includes("focus-visible"))).toBe(true);
     }
-    // A paleta Clay supera o piso de separação e permanece distinguível dos neutros
-    // equivalentes nos dois temas.
-    expect(separacaoDoNeutro(REGUA.claro, marca.claro.grauDoAccent, marca.claro.accent)).toBeCloseTo(0.1031, 4);
-    expect(separacaoDoNeutro(REGUA.escuro, marca.escuro.grauDoAccent, marca.escuro.accent)).toBeCloseTo(0.2091, 4);
-    expect(separacaoDoNeutro(REGUA.claro, marca.claro.grauDoAccent, marca.claro.accent)).toBeGreaterThan(0.08);
-
-    // Controle negativo: um accent cinza reprovaria as duas guardas. Sem esta linha, os
-    // pisos acima poderiam ser satisfeitos por qualquer coisa.
-    expect(hexParaOklch("#5d594f").C).toBeLessThan(PISO_DE_CROMA);
-    expect(deltaEOklab("#5d594f", "#5d594f")).toBe(0);
+    expect(hexParaOklch(REGUA.rampaDoProduto[6]).C).toBeLessThan(LIMIAR_ACROMATICO);
   });
 
   it("navy NÃO é acromática — o gatilho não decide no quarto decimal", () => {

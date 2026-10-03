@@ -135,7 +135,22 @@ export interface AgentRuntimeEvent {
   data: Record<string, unknown>;
 }
 
+/** Allowlisted boundary measurements only. Never raw prompts, outputs, arguments or reasoning. */
+export interface RuntimeObservation {
+  id: string;
+  kind: "generation" | "tool";
+  name: string;
+  startedAt: number;
+  endedAt: number;
+  status: "ok" | "error" | "cancelled";
+  model?: string;
+  provider?: string;
+  messageCount?: number;
+  usage?: RuntimeUsage;
+}
+
 export interface AgentTurnInput {
+  onObservation?: (observation: RuntimeObservation) => void | Promise<void>;
   systemPrompt: string;
   messages?: RuntimeMessage[];
   prompt: string;
@@ -164,6 +179,7 @@ export interface AgentTurnInput {
   shouldStopAfterTurn?: (input: {
     message: RuntimeMessage;
     turn: number;
+    /** Cumulative usage since this run() call began, NOT a per-turn delta. */
     usage: RuntimeUsage;
   }) => boolean | Promise<boolean>;
   steering?: {

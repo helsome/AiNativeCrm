@@ -1,21 +1,16 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { createClient } from "@/lib/supabase/server";
-import { normalizarIdioma } from "@/lib/i18n/idiomas";
+import { loadAuthUser } from "@/lib/auth/server";
+import { idiomaDoVisitante } from "@/lib/i18n/idiomaAnonimo";
 import { traduzir } from "@/lib/i18n/dicionario";
 
 export default async function ForbiddenPage() {
   // Rota fora da árvore de `app/app/layout.tsx` — sem `IdiomaProvider`, então
-  // resolve o idioma direto, como `admin/forbidden/page.tsx`. Pode chegar aqui
-  // sem sessão (link direto, robô), por isso `user` é opcional.
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const idioma = normalizarIdioma(
-    (user?.user_metadata?.locale as string | undefined) ?? null,
-  );
+  // Keep the authenticated app's saved/organization language. Without a
+  // session, use the same browser-language fallback as the login page.
+  const user = await loadAuthUser();
+  const idioma = user?.idioma ?? await idiomaDoVisitante(null);
 
   return (
     <main className="flex min-h-screen items-center justify-center p-8">

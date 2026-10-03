@@ -142,7 +142,6 @@ const DOCS = versionados("*.md").filter(
   (d) => referenciasBrutas(fs.readFileSync(path.join(RAIZ, d), "utf8")).length > 0,
 );
 
-
 /**
  * DÍVIDA PRÉ-EXISTENTE, enumerada — não escondida.
  *
@@ -185,36 +184,35 @@ const LEGADO = new Set([
  * que ele mesmo inventou**. Reprovar por motivo errado é tão ruim quanto passar
  * por motivo errado.
  */
+function normalizarReferencia(doc: string, ref: string): string {
+  const limpa = ref.replace(/^\.\//, "");
+  const dir = path.posix.dirname(doc);
+  const base = dir === "." || dir === "docs/handoffs" ? "evidence" : dir;
+  if (!limpa.includes("/")) return path.posix.join(base, limpa);
+  if (SUBPASTAS.has(limpa.split("/")[0]!)) return path.posix.join("evidence", limpa);
+  // Explicit repository anchors stay rooted. All other paths, including ../
+  // and screenshots/x.png, are relative to the document, not the repository.
+  if (/^(?:evidence|docs|loop|public|\.superpowers)\//.test(limpa)) return limpa;
+  return path.posix.normalize(path.posix.join(base, limpa));
+}
+
 function refsNormalizadas(doc: string): string[] {
   const texto = fs.readFileSync(path.join(RAIZ, doc), "utf8");
-  const dir = path.posix.dirname(doc);
-  const refs = referenciasBrutas(texto);
-  return [
-    ...new Set(
-      refs.map((ref) => {
-        const limpa = ref.replace(/^\.\//, "");
-        // `docs/handoffs/` conta como raiz: são handoffs ARQUIVADOS que nasceram
-        // na raiz do repo e citam evidência sem prefixo, como todo doc de raiz.
-        // Arquivar o documento não move as imagens — elas seguem em `evidence/`.
-        // Sem este caso o guarda procuraria as imagens dentro de `docs/handoffs/`
-        // e reprovaria documento correto por um caminho que ele mesmo inventou —
-        // exatamente o defeito que o comentário acima já mandou não repetir.
-        const base = dir === "." || dir === "docs/handoffs" ? "evidence" : dir;
-        // Sem diretório → resolve contra a pasta do documento.
-        if (!limpa.includes("/")) return path.posix.join(base, limpa);
-        // Subpasta REAL de evidence/ → também resolve. Aceitar a referência sem
-        // normalizá-la deixaria `wave3-pulso/x.png` procurando na raiz do repo:
-        // o guarda aceitaria a citação e depois não acharia o arquivo — mudei um
-        // lado e o outro não acompanhou, que é o defeito desta wave inteira.
-        if (SUBPASTAS.has(limpa.split("/")[0]!)) return path.posix.join("evidence", limpa);
-        // Caminho próprio (fora de evidence/): respeita como está.
-        return limpa;
-      }),
-    ),
-  ];
+  return [...new Set(referenciasBrutas(texto).map((ref) => normalizarReferencia(doc, ref)))];
 }
 
 describe("evidência citada", () => {
+  it("resolve subpastas e pais relativos sem deslocar âncoras do repositório", () => {
+    expect(normalizarReferencia("docs/testing/report.md", "screenshots/proof.png")).toBe(
+      "docs/testing/screenshots/proof.png",
+    );
+    expect(normalizarReferencia("docs/testing/report.md", "../evidence/proof.png")).toBe(
+      "docs/evidence/proof.png",
+    );
+    expect(normalizarReferencia("docs/testing/report.md", "evidence/proof.png")).toBe(
+      "evidence/proof.png",
+    );
+  });
   it("a quarentena não guarda documento que saiu da cobertura", () => {
     // O anti-apodrecimento só dispara para documento que o teste ALCANÇA. Se um
     // item da quarentena deixa de ter citação nenhuma (ou some do repo), ele
@@ -251,9 +249,10 @@ describe("evidência citada", () => {
   it("a descoberta de documentos não pode vir vazia", () => {
     // Sem esta guarda, um erro no `git ls-files` ou no filtro faria a suíte
     // inteira passar sem verificar nada — verde vácuo no nível do arquivo.
-    expect(DOCS.length, "nenhum documento versionado citando imagem foi encontrado").toBeGreaterThan(
-      0,
-    );
+    expect(
+      DOCS.length,
+      "nenhum documento versionado citando imagem foi encontrado",
+    ).toBeGreaterThan(0);
   });
 
   for (const doc of DOCS) {
@@ -262,7 +261,9 @@ describe("evidência citada", () => {
       // saber. A versão anterior fazia `return` em silêncio: renomear um handoff
       // evaporava a cobertura dele sem nada ficar vermelho.
       const caminho = path.join(RAIZ, doc);
-      expect(fs.existsSync(caminho), `${doc} está em git ls-files e não existe no disco`).toBe(true);
+      expect(fs.existsSync(caminho), `${doc} está em git ls-files e não existe no disco`).toBe(
+        true,
+      );
 
       const entregues = new Set(versionados("."));
       const mortas = refsNormalizadas(doc).filter((ref) => !entregues.has(ref));

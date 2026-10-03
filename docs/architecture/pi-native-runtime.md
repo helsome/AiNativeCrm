@@ -44,3 +44,10 @@ domain-owned seams. `pi-turn-execution.ts` owns the model-call adapter,
 inbound-turn code is intentionally CRM policy and persistence: guarded tool
 closures, handoff/follow-up behavior, checkpoint writes, and queue outcomes.
 The compatibility adapter is a bridge, not the target domain API.
+
+## Optional external Agent services
+
+The default-off adapters and their exact ownership, activation, delivery and verification limits are
+specified in [Agent services](../integrations/agent-services.md). Pi's real model/tool execution
+boundary emits only allowlisted measurements; customer memory and company Wiki retrieval remain
+separate from SQL workflow/approval authority. See the [service map](agent-services.architecture.json).

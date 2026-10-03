@@ -36489,7 +36489,7 @@ alter table public.ai_agent_run_events add constraint ai_agent_run_events_event_
  'run_started','context_loaded','model_decision','tool_proposed','policy_checked','tool_started','tool_completed',
  'crm_state_changed','human_confirmation_requested','human_confirmation_received','run_resumed','run_completed',
  'run_partial','run_failed','run_cancelled','usage_reported','collaboration_started','specialist_started',
- 'specialist_completed','specialist_failed','collaboration_conflict','collaboration_completed'
+ 'specialist_completed','specialist_failed','collaboration_conflict','collaboration_completed','manager_direction_consumed'
 ));
 
 alter table public.llm_calls add column if not exists workbench_run_id uuid;
@@ -37474,17 +37474,8 @@ alter table public.ai_mission_internal_inputs
 create unique index if not exists ai_mission_internal_inputs_direction_revision_uidx
   on public.ai_mission_internal_inputs(organization_id,mission_id,direction_revision)
   where kind='manager_direction' and direction_revision is not null;
-alter table public.ai_agent_run_events
-  drop constraint if exists ai_agent_run_events_event_type_check;
-alter table public.ai_agent_run_events
-  add constraint ai_agent_run_events_event_type_check check (event_type in (
-    'run_started','context_loaded','model_decision','tool_proposed','policy_checked',
-    'tool_started','tool_completed','crm_state_changed','human_confirmation_requested',
-    'human_confirmation_received','run_resumed','run_completed','run_partial',
-    'run_failed','run_cancelled','usage_reported','collaboration_started',
-    'specialist_started','specialist_completed','specialist_failed',
-    'collaboration_conflict','collaboration_completed','manager_direction_consumed'
-  ));
+-- 0399 event vocabulary is consolidated in the single 0307 constraint block
+-- above. Rebuilding the older vocabulary on update would reject live rows.
 notify pgrst, 'reload schema';
 
 -- 0400 — private idempotency receipt for post-approval Pi continuation.
@@ -37631,6 +37622,287 @@ create unique index if not exists webhook_events_log_signed_inbound_uidx
   on public.webhook_events_log(crm_inbound_message_id)
   where crm_inbound_message_id is not null;
 notify pgrst, 'reload schema';
+
+-- ---- Optional service settings (migration 0405) ----
+-- Optional services are infrastructure. No deployment or credential is created by this migration.
+create table if not exists public.ai_integration_settings (
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  provider text not null check (provider in ('mem0','weknora','langfuse')),
+  enabled boolean not null default false,
+  revision bigint not null default 1 check (revision > 0),
+  updated_at timestamptz not null default now(),
+  primary key (organization_id, provider)
+);
+alter table public.ai_integration_settings enable row level security;
+drop policy if exists tenant_isolation_ai_integration_settings_all on public.ai_integration_settings;
+create policy tenant_isolation_ai_integration_settings_all on public.ai_integration_settings
+  for select to authenticated using (organization_id in (select public.fn_user_org_ids()));
+revoke all on public.ai_integration_settings from public, anon, authenticated;
+grant select on public.ai_integration_settings to authenticated;
+grant select, insert, update, delete on public.ai_integration_settings to service_role;
+
+-- ---- Confirmed customer memories (migration 0406) ----
+-- Confirmed customer memory is owned by CRM; an external ID is only a projection.
+create unique index if not exists contacts_id_org_memory_uidx on public.contacts(id,organization_id);
+create table if not exists public.ai_customer_memories (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  contact_id uuid,
+  subject_key text not null check (subject_key ~ '^[a-f0-9]{64}$'),
+  request_key uuid not null,
+  category text not null check (category in ('preference','confirmed_fact','communication_context')),
+  body text not null check (char_length(body)<=2000),
+  content_hash text not null check (content_hash ~ '^[a-f0-9]{64}$'),
+  confirmed_by uuid references auth.users(id) on delete set null,
+  sync_state text not null default 'pending' check (sync_state in ('pending','sending','synced','reconcile','deleted')),
+  external_id text,
+  write_started_at timestamptz,
+  write_outcome text not null default 'never_started' check(write_outcome in ('never_started','in_flight','confirmed','unknown')),
+  deleted_at timestamptz,
+  remote_deleted_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique(organization_id,request_key),
+  foreign key(contact_id,organization_id) references public.contacts(id,organization_id) on delete set null (contact_id)
+);
+alter table public.ai_customer_memories enable row level security;
+revoke all on public.ai_customer_memories from public,anon,authenticated;
+grant select,insert,update,delete on public.ai_customer_memories to service_role;
+-- A contact privacy change retains a content-free external cleanup receipt.
+create or replace function public.fn_ai_customer_memory_privacy() returns trigger
+language plpgsql security definer set search_path=public as $$
+declare owner_org uuid; owner_contact uuid;
+begin
+  if TG_OP='DELETE' then owner_org:=old.organization_id; owner_contact:=old.id;
+  elsif new.is_anonymized is true or new.is_merged_into is not null then
+    owner_org:=new.organization_id; owner_contact:=new.id;
+  else return new;
+  end if;
+  with retired as (
+    update public.ai_customer_memories set body='',
+      remote_deleted_at=case when write_outcome='never_started' then now() else remote_deleted_at end,
+      sync_state='deleted',deleted_at=coalesce(deleted_at,now()),updated_at=now()
+    where organization_id=owner_org and contact_id=owner_contact and deleted_at is null returning id,organization_id
+  )
+  insert into public.event_log(organization_id,event_type,entity_kind,entity_id,payload)
+    select organization_id,'ai_integration.mem0_sync','ai_customer_memory',id,jsonb_build_object('memory_id',id) from retired;
+  if TG_OP='DELETE' then return old; end if;
+  return new;
+end $$;
+revoke all on function public.fn_ai_customer_memory_privacy() from public,anon,authenticated;
+drop trigger if exists trg_ai_customer_memory_privacy on public.contacts;
+create trigger trg_ai_customer_memory_privacy before update of is_anonymized,is_merged_into or delete on public.contacts
+  for each row execute function public.fn_ai_customer_memory_privacy();
+-- Never erase the last cleanup receipt before external deletion has been verified.
+create or replace function public.fn_ai_memory_org_delete_guard() returns trigger
+language plpgsql security definer set search_path=public as $$
+begin
+  if exists(select 1 from public.ai_customer_memories where organization_id=old.id
+    and sync_state in ('sending','synced','reconcile','deleted') and remote_deleted_at is null) then
+    raise exception 'external_customer_memory_cleanup_required';
+  end if;
+  return old;
+end $$;
+revoke all on function public.fn_ai_memory_org_delete_guard() from public,anon,authenticated;
+drop trigger if exists trg_ai_memory_org_delete_guard on public.organizations;
+create trigger trg_ai_memory_org_delete_guard before delete on public.organizations
+  for each row execute function public.fn_ai_memory_org_delete_guard();
+notify pgrst,'reload schema';
+
+-- ---- Immutable Wiki evidence (migration 0407) ----
+-- Immutable observed Wiki content/provenance. Source withdrawal is checked on every read.
+create unique index if not exists ai_knowledge_sources_org_id_wiki_uidx on public.ai_knowledge_sources(organization_id,id);
+create table if not exists public.ai_wiki_evidence (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  source_id uuid not null,
+  manifest_hash text not null check(manifest_hash ~ '^[a-f0-9]{64}$'),
+  manifest jsonb not null,
+  content text not null check(char_length(content)<=100000),
+  created_at timestamptz not null default now(),
+  foreign key(organization_id,source_id) references public.ai_knowledge_sources(organization_id,id) on delete cascade,
+  unique(organization_id,source_id,manifest_hash)
+);
+alter table public.ai_wiki_evidence enable row level security;
+revoke all on public.ai_wiki_evidence from public,anon,authenticated,service_role;
+grant select,insert on public.ai_wiki_evidence to service_role;
+notify pgrst,'reload schema';
+
+-- ---- PostgreSQL legal customer scheduling GUC (migration 0408) ----
+-- Forward fix 0408: PostgreSQL custom GUC prefixes cannot contain hyphens.
+-- Replace only the two affected function bodies; preserve signatures, ACLs,
+-- tenant filters, row locks, trigger ordering and transaction-local authority.
+create or replace function public.fn_recalcular_cliente_do_contato(p_org uuid, p_contact uuid, p_emitir boolean)
+returns text
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  c_etiqueta constant text := 'cliente';
+  v_antes timestamptz;
+  v_tags text[];
+  v_reconhecido timestamptz;
+  v_dono text;
+  v_depois timestamptz;
+  v_tem boolean;
+  v_novas text[];
+  v_resultado text;
+begin
+  -- TRAVA O CONTATO ANTES DE LER A AGENDA. Na ordem inversa, duas marcações
+  -- simultâneas do mesmo contato gravam um min() velho por cima do certo: em
+  -- READ COMMITTED o min() lido DEPOIS da trava enxerga a marcação concorrente
+  -- que já commitou.
+  --
+  -- `for no key update`, e não `for update`: é a trava que o UPDATE abaixo toma
+  -- de qualquer jeito, e ela não conflita com o `for key share` que a FK de toda
+  -- tabela que aponta para `contacts` toma num INSERT. Medido com `for update`:
+  -- a ligação da regra (trava da organização, depois o contato) e um INSERT de
+  -- agendamento (a FK trava o contato, depois o trigger espera a trava da
+  -- organização) fechavam `deadlock detected`.
+  --
+  -- Anonimizado e mesclado não recebem escrita derivada nova: sem esta guarda
+  -- um agendamento posterior faria "Cliente Anonimizado #N" reaparecer
+  -- etiquetado.
+  select c.first_service_at, coalesce(c.tags, '{}'::text[]), c.client_recognized_at, c.client_tag_by_system
+    into v_antes, v_tags, v_reconhecido, v_dono
+    from public.contacts c
+   where c.organization_id = p_org
+     and c.id = p_contact
+     and c.is_anonymized = false
+     and c.is_merged_into is null
+   for no key update;
+  if not found then
+    return 'ignorado';
+  end if;
+
+  select min(least(a.created_at, a.starts_at)) into v_depois
+    from public.calendar_appointments a
+   where a.organization_id = p_org
+     and a.contact_id = p_contact
+     and public.fn_situacao_conta_como_atendimento(a.status);
+
+  -- O caso comum — cliente antigo marcando a enésima hora — não escreve nada:
+  -- `updated_at` não se move e o contato não vira ruído de realtime.
+  if v_antes is not distinct from v_depois then
+    return 'igual';
+  end if;
+
+  v_tem := c_etiqueta = any(v_tags);
+
+  -- REDE, e não mais a regra: quem lê o que a equipe fez é a guarda da seção
+  -- 4b, na hora da escrita. Isto aqui alcança os dois casos que ela não vê —
+  -- um banco que aplicou uma versão anterior desta migration (a etiqueta mudou
+  -- de mão antes de a guarda existir) e uma restauração com
+  -- `session_replication_role = replica`, que desliga trigger.
+  if (v_dono = 'added' and not v_tem) or (v_dono = 'removed' and v_tem) then
+    v_dono := null;
+  end if;
+
+  -- `array_append`/`array_remove` e não `||`: sem cast, o `||` lê o literal
+  -- como ARRAY e morre em `malformed array literal` (medido pelo autor no CI).
+  v_novas := v_tags;
+  if v_antes is null then
+    -- Virou cliente. A etiqueta entra se nunca foi reconhecido (a primeira vez)
+    -- ou se foi o sistema que a tirou. Se a equipe a tirou, fica fora.
+    if not v_tem and (v_reconhecido is null or v_dono = 'removed') then
+      v_novas := array_append(v_tags, c_etiqueta);
+      v_dono := 'added';
+      v_resultado := 'etiquetado';
+    else
+      v_resultado := 'virou_cliente';
+    end if;
+  elsif v_depois is null then
+    -- Deixou de ser cliente. Só sai a etiqueta que é do sistema.
+    if v_tem and v_dono = 'added' then
+      v_novas := array_remove(v_tags, c_etiqueta);
+      v_dono := 'removed';
+      v_resultado := 'desetiquetado';
+    else
+      v_resultado := 'deixou_de_ser_cliente';
+    end if;
+  else
+    v_resultado := 'mudou_a_data';
+  end if;
+
+  -- A ESCRITA SE ANUNCIA. `auth.uid()` continua preenchido aqui dentro — uma
+  -- `security definer` troca o dono da função, nunca o JWT da sessão —, então
+  -- sem um sinal explícito a guarda da seção 4b barraria o próprio sistema. A
+  -- chave é de TRANSAÇÃO (`set_config(..., true)`) e volta a 'off' na linha
+  -- seguinte: a janela é o UPDATE, não o resto da transação.
+  perform set_config('pi_native.cliente_pela_agenda', 'on', true);
+
+  update public.contacts
+     set first_service_at = v_depois,
+         client_recognized_at = coalesce(v_reconhecido, case when v_depois is not null then now() end),
+         client_tag_by_system = v_dono,
+         tags = v_novas,
+         updated_at = now()
+   where organization_id = p_org
+     and id = p_contact;
+
+  perform set_config('pi_native.cliente_pela_agenda', 'off', true);
+
+  -- UMA VEZ POR CONTATO: só quando a etiqueta entra na primeira vez que a regra
+  -- o reconhece.
+  if v_resultado = 'etiquetado' and v_reconhecido is null and p_emitir then
+    -- O MESMO formato que o app emite (app/api/v1/contacts/_handler.ts e
+    -- lib/automation/actions/add-tag.ts): `added_tags` + `tags`.
+    --
+    -- SEM `service_origin`: `emit_event` o carimba sozinho para
+    -- contact.tag_added, e o recusaria (42501) vindo de sessão autenticada.
+    -- SEM `caused_by_rule`: a automação TEM de ver este evento.
+    -- Trigger nunca faz HTTP: a linha vai para event_log e o worker consome.
+    perform public.emit_event(
+      'contact.tag_added',
+      'contact',
+      p_contact,
+      jsonb_build_object('added_tags', jsonb_build_array(c_etiqueta), 'tags', to_jsonb(v_novas)),
+      jsonb_build_object('actor_type', 'system', 'actor_id', 'trg_agendamento_marca_cliente'),
+      p_org
+    );
+  end if;
+
+  return v_resultado;
+end $$;
+
+revoke execute on function public.fn_recalcular_cliente_do_contato(uuid, uuid, boolean) from public, anon, authenticated;
+create or replace function public.fn_colunas_de_cliente_sao_do_sistema()
+returns trigger
+language plpgsql
+set search_path = public, pg_temp
+as $$
+declare
+  c_etiqueta constant text := 'cliente';
+begin
+  if auth.uid() is not null
+     and coalesce(current_setting('pi_native.cliente_pela_agenda', true), '') <> 'on'
+     and (old.first_service_at is distinct from new.first_service_at
+       or old.client_recognized_at is distinct from new.client_recognized_at
+       or old.client_tag_by_system is distinct from new.client_tag_by_system) then
+    raise exception 'colunas_de_cliente_sao_do_sistema' using errcode = '42501';
+  end if;
+
+  if new.client_tag_by_system is not null
+     and old.client_tag_by_system is not distinct from new.client_tag_by_system
+     and (c_etiqueta = any(coalesce(old.tags, '{}'::text[])))
+         is distinct from (c_etiqueta = any(coalesce(new.tags, '{}'::text[]))) then
+    new.client_tag_by_system := null;
+  end if;
+
+  return new;
+end $$;
+
+comment on function public.fn_colunas_de_cliente_sao_do_sistema() is
+  'Guarda de contacts (migration 0262): sessão nenhuma grava first_service_at, client_recognized_at ou '
+  'client_tag_by_system (42501 colunas_de_cliente_sao_do_sistema); o service role e as migrations passam. '
+  'E quem mexe na etiqueta cliente sem gravar o dono na mesma escrita vira o dono dela, o que é como a '
+  'remoção à mão passa a ser respeitada NA HORA. Provado em tests/invariants/cliente-nasce-do-agendamento.test.ts.';
+
+-- Função de trigger não exige EXECUTE de quem dispara o UPDATE; revogar das
+-- duas origens (o grant a PUBLIC e o grant direto a `anon` do baseline) não
+-- quebra nada.
+revoke execute on function public.fn_colunas_de_cliente_sao_do_sistema() from public, anon, authenticated;
 
 -- ---- VARREDURA anon: fecha os apêndices posteriores à migration 0116 ----
 -- O bloco original 0116 precede as migrations acrescentadas ao baseline ao

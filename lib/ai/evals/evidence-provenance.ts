@@ -104,6 +104,9 @@ export function auditWorkbenchEvidenceProvenance(
       case "crm_get_conversation":
         addRecords(observed, facts, "conversation", value.conversation ?? value);
         break;
+      case "crm_get_org_memory":
+        addRecords(observed, facts, "knowledge", value.evidence);
+        break;
       case "crm_search_knowledge":
         addRecords(observed, facts, "knowledge", value.evidence);
         addRecords(observed, facts, "knowledge", value.trechos, "chunk_id");

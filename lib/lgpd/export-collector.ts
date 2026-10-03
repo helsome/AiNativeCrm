@@ -402,6 +402,7 @@ export interface ExportPayload {
   generated_at: string;
   no_local_footprint: boolean;
   contact: ContactSnapshot | null;
+  customer_memories?: Array<{ id: string; category: string; body: string; created_at: string; sync_state: string }>;
   consents: ConsentRow[];
   conversations: ConversationRow[];
   messages_count_total: number;
@@ -1247,6 +1248,18 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
 
   const perfil = perfilDoPais(controlador.country);
 
+  const customer_memories: NonNullable<ExportPayload["customer_memories"]> = [];
+  if (contactId) {
+    for (let offset = 0; ; offset += 500) {
+      const { data, error } = await admin.from("ai_customer_memories")
+        .select("id,category,body,created_at,sync_state")
+        .eq("organization_id", organizationId).eq("contact_id", contactId)
+        .is("deleted_at", null).order("id").range(offset, offset + 499);
+      if (error) throw new Error("customer_memory_export_incomplete");
+      customer_memories.push(...(data ?? []));
+      if (!data || data.length < 500) break;
+    }
+  }
   return {
     request_id: requestId,
     organization_id: organizationId,
@@ -1263,6 +1276,7 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
       prospecting_candidates.length === 0,
     contact,
     consents,
+    customer_memories,
     conversations,
     messages_count_total,
     messages_recent,

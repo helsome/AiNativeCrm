@@ -110,6 +110,12 @@ fonte só (`lib/onboarding/passos.ts`) — eram três listas que discordavam. Ga
 | J3.14 | Ver se o que está ligado está funcionando (aba Capacidades) | usos, falhas, quantos vieram de teste, última vez — e o que fazer com cada número · **PASS** (números escritos pelo emissor real de audit) |
 | J3.15 | O teto recusa a passagem, explicando em português | **PASS** — exercitável desde que o catálogo cresceu (57 capacidades). `capacidades-do-agente.spec.ts` liga "Atender" sobre as 8 do seed e prova a recusa por 1 vaga. A afirmação "não exercitável hoje, com 16 capacidades no catálogo" VENCEU |
 
+### Agent integration and evaluation controls (2026-10-03)
+
+- Manager can read integration readiness and reconcile customer-memory cleanup, but cannot activate/pause providers, retry deliveries or register Wiki sources. The page passes server-resolved capabilities; API guards remain authoritative. Regression: `components/ai/AgentServicePanels.test.tsx` and `app/app/ai/providers/page.test.tsx`.
+- A failed evaluation read (HTTP 409/500/503, transport or invalid JSON) remains visible without hiding the completed run result. The explicit retry performs GET only; late responses cannot replace a newer conversation or history selection. Regression: `tests/unit/workbench-evaluation-errors.test.tsx`.
+- Evidence here is focused offline React/handler coverage. It does not establish live vendor connectivity, database/RLS correctness, or a fresh-install authenticated browser journey.
+
 ## Chaves de acesso à IA `[P0]`
 
 - `[P0]` Colar chave inválida e entender o motivo — `tests/e2e/credenciais-de-ia.spec.ts`. Achados corrigidos em 2026-09-02: lista de modelos colada por vírgula no card; "Validando…" eterno após restart; erro em código (`auth_failed_401`, no card e no toast); diálogo sem dizer quando usar cada provedor nem onde pegar a chave; contagem "em uso" divergente do DELETE. **PASS** — executada de verdade contra browser real (Supabase local pg17 + baseline + Chromium) em 2026-09-02, depois que o Docker da máquina (antes indisponível) voltou. A própria execução achou um SEXTO defeito que a leitura de código não tinha achado: `descreverErroDeValidacao` não classificava `TypeError` (o nome que o `fetch()` do Node usa para falha de rede/DNS) como erro de rede, e o card mostrava "Falha na validação (TypeError)." cru em vez da frase amigável — corrigido em `lib/ai/credenciais/erro-de-validacao.ts`, com caso de teste. Evidência em `.superpowers/evidence/credenciais-de-ia.png`.
@@ -2853,3 +2859,18 @@ que dirige o browser resolviam `E2E_PORT` para valores **diferentes** — servid
 `page.goto` em outra, e `ERR_CONNECTION_REFUSED` com um servidor saudável no ar. O CI nunca
 pisou nisso porque o gerador não escreve `E2E_PORT`; quem monta bancada em porta própria,
 sim. Consertado pela ordem: publicar primeiro, decidir a porta depois.
+
+## Bancada chat-first — verificação parcial de 2026-10-01
+
+Escopo `[P1]`: `/app/ai/workbench`, sem alterar papéis, APIs ou navegação do CRM.
+`tests/unit/workbench-chat-first.test.tsx`, `workbench-delegation-state.test.tsx` e
+`workbench-viewport-shell.test.tsx` exercitam DOM real com APIs inteiramente em memória: campo
+sempre numa região não encolhível, mensagens com rolagem própria, teclado/IME, dois resultados,
+missão explícita, painéis/foco, histórico em execução, cancelar, aprovar/rejeitar e desfazer.
+`rodape-ocupado-durante-a-chamada.test.tsx` continua protegendo a reserva de voz compartilhada.
+
+**Pendente pela tela real:** desktop estreito, telefone com teclado aberto, banners de conexão e
+painel de voz, foco após aprovação, e jornada com Supabase fresco/modelo. jsdom não mede pixels.
+As specs opt-in `agent-crm-workbench-real-model.spec.ts` e
+`agent-crm-workbench-real-tenant.spec.ts` foram adaptadas, mas não executadas nesta mudança.
+Não registrar esta cobertura parcial como PASS de E2E.

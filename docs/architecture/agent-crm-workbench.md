@@ -215,3 +215,83 @@ through the CRM credential UI. No real-tenant mutation scenario is enabled.
   attempt closes exactly one row.
 - Full details and sanitized Agent input/output/tool traces are in
   `docs/testing/multi-agent-eval-real-run-2026-09-28.md`.
+
+## Chat-first workbench surface — 2026-10-01
+
+The `/app/ai/workbench` route now owns the available viewport inside the existing AppShell.
+It preserves all application navigation, the current tenant/role guards, the shared voice-footer
+reservation and the organization model binding. Only this route replaces outer page scrolling
+with a bounded message area and a non-shrinking composer. `visualViewport` resize/scroll events
+update available height; banners above the shell are measured without a second hardcoded header
+height. Physical mobile-keyboard and browser geometry verification remain outstanding.
+
+- The compact agent picker and execution mode stay visible. Enter submits, Shift+Enter inserts a
+  newline, and composition events/keyCode 229 do not submit Chinese text prematurely.
+- Task settings contain CRM-object search, explicit lead-mission delegation/acceptance, knowledge
+  policy, evaluation profile and copy/customize. Inspect mode and scope changes still clear
+  delegation; missing acceptance opens settings instead of silently blocking behind a closed panel.
+- Run details contain proposals and approve/reject/undo, mission state, reply drafts, usage,
+  specialists, evaluation/Judge and the complete expandable event trace. Pending proposals also
+  surface an action in the conversation. Run termination and business acceptance remain distinct.
+- New Conversation clears local presentation/draft/mission options and returns to inspect mode;
+  it does not delete durable runs. History loads the real persisted record. Active historical or
+  deep-linked runs refresh until terminal; stale history/deep-link responses cannot overwrite a
+  newer selection. Cancellation remains available while a run is active.
+- Multiple completed task/result pairs remain visible during this mounted session. This is a
+  presentation grouping, **not a new durable conversation or implicit model memory**. Every submit
+  retains the existing independent `POST /api/v1/ai/workbench/runs` contract, scoped CRM context
+  and server-side runtime. No fixture replies are mounted in the production app.
+- Radix Sheet supplies modal focus trapping, Escape and close controls. Errors are visible inside
+  the open panel. Focus returns to the composer or an enabled panel opener during active runs.
+
+### Living-system checklist and destination
+
+Destination: **core UI**, because the already-distributed workbench must remain useful with zero
+extensions. No new database, permission, tool or worker contract is introduced.
+
+1. Input: built-in agents and tenant-scoped run/detail/object/evaluation APIs.
+2. Output: existing run creation, cancel, proposal decision/undo and evaluation endpoints.
+3. Records: existing durable `ai_workbench_runs`, ordered events and server audit boundaries.
+4. Visibility: conversation results plus the Run Details panel in `AgentCrmWorkbench`.
+5. Entry: existing navigation destination `/app/ai/workbench`; no menu removed or new route added.
+6. Continuation: visible pending approvals, durable history, active-run refresh and stop.
+7. Configuration: Task Settings plus `/app/ai/providers`; missing model disables execution.
+8. Human/AI continuity: existing persisted proposal decisions and resumed runs.
+9. Feedback: visible in-panel errors, retryable drafts, deterministic/optional semantic evaluation;
+   no automatic learning or new memory writes are claimed.
+10. Map: this section records the unchanged UI → workbench API → durable runtime edges; no new
+    architecture node is needed for the layout change.
+
+### Verification boundary
+
+Focused offline React/DOM tests cover conversation grouping, API payloads, keyboard/IME,
+settings dismissal/focus, mission reset, history/cancellation/approval/undo and viewport reservation
+contracts. Fetch is fully stubbed in those tests. They prove behavior and containment classes,
+not physical browser layout, live model behavior or a fresh-Supabase E2E journey.
+The existing opt-in real-model/real-tenant E2E selectors follow the new controls, but were not run
+for this port. Full unit/CI execution is intentionally not claimed because the existing full
+suite includes live external-model paths; required live/browser checks remain a maintainer gate.
+
+## Real-runtime parity wiring (2026-10-01)
+
+The versioned organization-memory assembly in `lib/agent-engine/agent/org-memory.ts` is shared by
+inbound, the MCP read and both initial/resumed Workbench model calls. Specialists inherit that
+system context. Resumption resolves the current published policy and records its content-free
+revision in `context_loaded`; it does not claim an old frozen policy snapshot.
+
+`crm_get_conversation_history` adds read-only customer memory through `customer-memory.ts` only
+for the current organization/contact/conversation/service/demanda boundary. It rechecks that
+boundary after reading, and never falls back to a different conversation or a contact-wide record.
+
+RAG reads immutable chunk provenance after vector retrieval. The common evidence parser preserves
+nested locators into specialist state. Source revisions and chunk excerpt identity are checked
+separately to avoid reporting complementary paragraphs as contradictions. The observed-evidence
+projection re-authorizes current runnable Agent source IDs (including built-in drafts), source
+activation and memory visibility before rendering snippets; raw runtime messages remain private.
+The precise source endpoint supports version/chunk locators and labels noncurrent indexes.
+
+MissionSendControl calls the existing atomic send-policy command with a reason and replay key.
+It controls customer sending only, never claims to suspend all execution or recall in-flight
+messages. Eval refuses incomplete material reads and the UI exposes deterministic finding reasons.
+See [the capability/setup matrix](../design/crm-real-api-parity-2026-10-01.md) for tested boundaries
+and the deliberately separate local demonstration semantics.

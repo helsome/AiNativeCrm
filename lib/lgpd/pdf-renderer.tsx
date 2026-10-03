@@ -193,6 +193,13 @@ export function LgpdExportPdf({ data, unsignedWarning }: Props): React.ReactElem
           ) : null}
         </View>
 
+        {(data.customer_memories?.length ?? 0) > 0 && <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Memórias confirmadas do cliente</Text>
+          {data.customer_memories!.map((memory) => <View key={memory.id} style={styles.row}>
+            <Text style={styles.label}>{memory.category}</Text><Text style={styles.value}>{memory.body}</Text>
+          </View>)}
+        </View>}
+
         {/* Contact */}
         {data.contact ? (
           <View style={styles.section}>

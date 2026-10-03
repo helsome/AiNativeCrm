@@ -4,13 +4,16 @@
  * onde deveria haver uma contagem.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { CredentialCard } from "./CredentialCard";
-import type { CredentialRow } from "@/hooks/ai/useCredentials";
+import { credentialsListQueryKey, type CredentialRow } from "@/hooks/ai/useCredentials";
+import { apiClient } from "@/lib/api/client";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("../_actions", () => ({ refreshCredentialsView: vi.fn() }));
+vi.mock("@/lib/api/client", () => ({ apiClient: { delete: vi.fn() } }));
+vi.mock("@/components/feedback/ApiErrorToast", () => ({ showApiError: vi.fn() }));
 
 export function credencial(extra: Partial<CredentialRow> = {}): CredentialRow {
   return {
@@ -67,4 +70,23 @@ describe("CredentialCard — erro de validação", () => {
     montar(credencial({ validated_at: null, validation_error: "network_error" }));
     expect(screen.queryByRole("link", { name: /Pegar chave em/ })).toBeNull();
   });
+});
+
+describe("server-confirmed deletion", () => {
+  for (const succeeds of [true, false]) {
+    it(succeeds ? "removes the acknowledged row even if refetch never finishes" : "preserves the row if DELETE is refused", async () => {
+      const client = new QueryClient();
+      const row = credencial();
+      client.setQueryData(credentialsListQueryKey, [row, { ...row, id: "keep" }]);
+      vi.spyOn(client, "invalidateQueries").mockImplementation(() => new Promise(() => {}));
+      if (succeeds) vi.mocked(apiClient.delete).mockResolvedValue({ data: null });
+      else vi.mocked(apiClient.delete).mockRejectedValue(new Error("server_refused"));
+      render(<QueryClientProvider client={client}><CredentialCard credential={row} canWrite usageCount={0} /></QueryClientProvider>);
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Excluir credencial" })); });
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Remover" })); });
+      expect(client.getQueryData<CredentialRow[]>(credentialsListQueryKey)?.map((c) => c.id))
+        .toEqual(succeeds ? ["keep"] : ["c1", "keep"]);
+      client.clear();
+    });
+  }
 });
