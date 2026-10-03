@@ -1,12 +1,28 @@
 # Pi Native CRM: chat-first, no-key demonstration
 
+## 2026-10-03 真实模型录制
+
+工作台右上角“真实模型录制”新增两次本机真实 Pi / OpenCode `space-bunny-free` 运行，
+包含脱敏任务、Tool Calling 输入/观察、持久化事件、模型 token/耗时、最终输出与已保存 Eval。
+数据来自虚构演示客户，网页只读回放，不发起新的模型或第三方请求。
+
+- 修复前：SQL 存在 1 条确认记忆，工具没有返回；旧 Judge 88/pass 漏判。新 profile 8 和
+  rubric 2 独立复核同一次历史运行：确定性 fail/66、真实 Judge fail/32。
+- 修复后：Mem0 OFF 时本地与会话工具均读到 1 条确认记忆；真实 Judge pass/92，
+  总体 needs_review/71，因缺少 Wiki/会话材料不能称为完整交付。
+- 本机录制不是网站实时执行，不证明 Mem0、WeKnora、Langfuse 已连接。
+- 下载 JSON 只导出已审查的合成录制，不含密钥、隐藏推理、电话、邮箱或完整工具正文。
+
+证据源：`../../docs/testing/fixtures/agent-services-real-2026-10-03.json`。
+新的浏览器实测见 `../../docs/testing/agent-services-real-run-2026-10-03.md`。
+
 This is a standalone, buildless browser example. Open `dist/index.html` through any ordinary static file server. It does not start the real Next.js CRM, Supabase, an agent worker, a model, or a messaging integration. All customers, prices, dates, approvals and local tasks are fictional.
 
 ## Optional Agent services: source-aligned preview
 
 Source baseline: `12749abaa8aa98f7bee988f69fb4aa23e9d5ff29` on `feat/chat-first-workbench-2026-10-01`.
 
-The existing **AI 提供商 → Agent 服务接入** page now shows Mem0, WeKnora and Langfuse as OFF / NOT CONNECTED. All service enable/retry and credential-entry controls are disabled. The **服务接入** button in Agent chat opens four source-linked panels. Customer detail has its own contact-scoped memory panel.
+The existing **AI 提供商 → Agent 服务接入** page now shows Mem0, WeKnora and Langfuse as OFF / NOT CONNECTED. All service enable/retry and credential-entry controls are disabled. The **服务接入** button in Agent chat opens five source-linked panels, including the recorded real-model comparison. Customer detail has its own contact-scoped memory panel.
 
 - Configuration shows the real server-only binding fields, configuration versus connectivity boundary, required migrations, admin activation, isolated delivery lane and cleanup limitations
 - Customer-memory scenarios require explicit confirmation, then illustrate pending, synced, unknown-write settlement and local deletion redaction. They are in-memory scenarios, not API responses. A different contact cannot inherit the form or records
