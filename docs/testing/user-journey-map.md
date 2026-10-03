@@ -110,6 +110,12 @@ fonte só (`lib/onboarding/passos.ts`) — eram três listas que discordavam. Ga
 | J3.14 | Ver se o que está ligado está funcionando (aba Capacidades) | usos, falhas, quantos vieram de teste, última vez — e o que fazer com cada número · **PASS** (números escritos pelo emissor real de audit) |
 | J3.15 | O teto recusa a passagem, explicando em português | **PASS** — exercitável desde que o catálogo cresceu (57 capacidades). `capacidades-do-agente.spec.ts` liga "Atender" sobre as 8 do seed e prova a recusa por 1 vaga. A afirmação "não exercitável hoje, com 16 capacidades no catálogo" VENCEU |
 
+### Agent integration and evaluation controls (2026-10-03)
+
+- Manager can read integration readiness and reconcile customer-memory cleanup, but cannot activate/pause providers, retry deliveries or register Wiki sources. The page passes server-resolved capabilities; API guards remain authoritative. Regression: `components/ai/AgentServicePanels.test.tsx` and `app/app/ai/providers/page.test.tsx`.
+- A failed evaluation read (HTTP 409/500/503, transport or invalid JSON) remains visible without hiding the completed run result. The explicit retry performs GET only; late responses cannot replace a newer conversation or history selection. Regression: `tests/unit/workbench-evaluation-errors.test.tsx`.
+- Evidence here is focused offline React/handler coverage. It does not establish live vendor connectivity, database/RLS correctness, or a fresh-install authenticated browser journey.
+
 ## Chaves de acesso à IA `[P0]`
 
 - `[P0]` Colar chave inválida e entender o motivo — `tests/e2e/credenciais-de-ia.spec.ts`. Achados corrigidos em 2026-09-02: lista de modelos colada por vírgula no card; "Validando…" eterno após restart; erro em código (`auth_failed_401`, no card e no toast); diálogo sem dizer quando usar cada provedor nem onde pegar a chave; contagem "em uso" divergente do DELETE. **PASS** — executada de verdade contra browser real (Supabase local pg17 + baseline + Chromium) em 2026-09-02, depois que o Docker da máquina (antes indisponível) voltou. A própria execução achou um SEXTO defeito que a leitura de código não tinha achado: `descreverErroDeValidacao` não classificava `TypeError` (o nome que o `fetch()` do Node usa para falha de rede/DNS) como erro de rede, e o card mostrava "Falha na validação (TypeError)." cru em vez da frase amigável — corrigido em `lib/ai/credenciais/erro-de-validacao.ts`, com caso de teste. Evidência em `.superpowers/evidence/credenciais-de-ia.png`.

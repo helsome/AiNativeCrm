@@ -89,6 +89,7 @@ type Detail = Run & {
   }>;
   usage?: { inputTokens: number; outputTokens: number; costCents: number; calls: number };
   evaluation?: EvaluationReport;
+  evaluationError?: string;
   observed_evidence?: Array<{
     id: string;
     namespace: string;
@@ -184,6 +185,35 @@ function eventLabel(event: EventRow): string {
   return EVENT_LABELS[event.event_type] ?? event.event_type;
 }
 
+const fetchEvaluation = async (
+  runId: string,
+): Promise<Pick<Detail, "evaluation" | "evaluationError">> => {
+  try {
+    const response = await fetch(`/api/v1/ai/workbench/runs/${runId}/evaluation`);
+    const body = await response.json();
+    if (!response.ok)
+      return {
+        evaluation: undefined,
+        evaluationError: body.error?.message ?? "无法读取评测，请重试。",
+      };
+    return { evaluation: body.data ?? undefined, evaluationError: undefined };
+  } catch {
+    return { evaluation: undefined, evaluationError: "无法读取评测，请检查连接后重试。" };
+  }
+};
+const fetchDetail = async (runId: string): Promise<Detail> => {
+  const [detailResponse, evaluation] = await Promise.all([
+    fetch(`/api/v1/ai/workbench/runs/${runId}`),
+    fetchEvaluation(runId),
+  ]);
+  const detailBody = await detailResponse.json();
+  if (!detailResponse.ok) throw new Error(detailBody.error?.message ?? "无法读取运行详情");
+  return {
+    ...detailBody.data,
+    ...evaluation,
+  };
+};
+
 export function AgentCrmWorkbench({
   agents,
   modelConfigured,
@@ -217,8 +247,12 @@ export function AgentCrmWorkbench({
   const cancellingRef = useRef(false);
   const [cancelling, setCancelling] = useState(false);
   const readingHistory = useRef(0);
+  const evaluationRequest = useRef<{ runId: string; selection: number } | null>(null);
+  const [readingEvaluation, setReadingEvaluation] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [evalExportNotice, setEvalExportNotice] = useState<{ runId: string; text: string } | null>(null);
+  const [evalExportNotice, setEvalExportNotice] = useState<{ runId: string; text: string } | null>(
+    null,
+  );
   const [detail, setDetail] = useState<Detail | null>(null);
   const [runs, setRuns] = useState<Run[]>([]);
   const [objectKind, setObjectKind] = useState<ObjectKind>(initialLead ? "lead" : "contact");
@@ -237,18 +271,32 @@ export function AgentCrmWorkbench({
     const body = await response.json();
     return response.ok && Array.isArray(body.data) ? body.data : [];
   };
-  const fetchDetail = async (runId: string): Promise<Detail> => {
-    const [detailResponse, evalResponse] = await Promise.all([
-      fetch(`/api/v1/ai/workbench/runs/${runId}`),
-      fetch(`/api/v1/ai/workbench/runs/${runId}/evaluation`),
-    ]);
-    const detailBody = await detailResponse.json();
-    if (!detailResponse.ok) throw new Error(detailBody.error?.message ?? "无法读取运行详情");
-    const evalBody = await evalResponse.json();
-    return {
-      ...detailBody.data,
-      ...(evalResponse.ok && evalBody.data ? { evaluation: evalBody.data } : {}),
-    };
+  const retryEvaluation = async () => {
+    if (
+      !detail ||
+      busy ||
+      cancelling ||
+      !["completed", "partial", "failed", "cancelled"].includes(detail.status)
+    )
+      return;
+    const runId = detail.id;
+    const selection = readingHistory.current;
+    if (
+      evaluationRequest.current?.runId === runId &&
+      evaluationRequest.current.selection === selection
+    )
+      return;
+    const request = { runId, selection };
+    evaluationRequest.current = request;
+    setReadingEvaluation(runId);
+    setEvalExportNotice(null);
+    const evaluation = await fetchEvaluation(runId);
+    if (evaluationRequest.current !== request) return;
+    evaluationRequest.current = null;
+    setReadingEvaluation(null);
+    if (readingHistory.current !== selection) return;
+    // Only replace this read's evaluation, never a newer run result or status.
+    setDetail((current) => (current?.id === runId ? { ...current, ...evaluation } : current));
   };
   const loadRuns = async () => setRuns(await fetchRuns());
   useEffect(() => {
@@ -490,14 +538,23 @@ export function AgentCrmWorkbench({
     setBusy(true);
     setError("");
     try {
-      const response = await fetch(`/api/v1/ai/workbench/runs/${detail.id}/evaluation${mode === "semantic" ? "" : "?mode=deterministic_export"}`, {
-        method: "POST",
-      });
+      const response = await fetch(
+        `/api/v1/ai/workbench/runs/${detail.id}/evaluation${mode === "semantic" ? "" : "?mode=deterministic_export"}`,
+        {
+          method: "POST",
+        },
+      );
       const body = await response.json();
       if (!response.ok) throw new Error(body.error?.message ?? "评测操作失败");
-      if (mode === "deterministic_export") setEvalExportNotice({ runId: detail.id, text: "确定性评测已保存；Langfuse 启用时会排队投递，不消耗额外模型额度。" });
+      if (mode === "deterministic_export")
+        setEvalExportNotice({
+          runId: detail.id,
+          text: "确定性评测已保存；Langfuse 启用时会排队投递，不消耗额外模型额度。",
+        });
       setDetail((current) =>
-        current?.id === detail.id ? { ...current, evaluation: body.data } : current,
+        current?.id === detail.id
+          ? { ...current, evaluation: body.data, evaluationError: undefined }
+          : current,
       );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "语义 Judge 运行失败");
@@ -633,6 +690,8 @@ export function AgentCrmWorkbench({
   const resetConversation = () => {
     if (cannotStart) return;
     readingHistory.current += 1;
+    evaluationRequest.current = null;
+    setReadingEvaluation(null);
     setDetail(null);
     setPreviousTurns([]);
     setSubmittedTask("");
@@ -650,6 +709,8 @@ export function AgentCrmWorkbench({
   const openHistory = async (runId: string) => {
     if (cannotStart) return;
     const request = ++readingHistory.current;
+    evaluationRequest.current = null;
+    setReadingEvaluation(null);
     setError("");
     try {
       const loaded = await fetchDetail(runId);
@@ -786,6 +847,14 @@ export function AgentCrmWorkbench({
             )}
             {detail?.error_code && (
               <p className="text-sm text-destructive">运行错误：{detail.error_code}</p>
+            )}
+            {detail?.evaluationError && (
+              <button
+                onClick={() => openPanel("details")}
+                className="text-sm text-destructive underline"
+              >
+                评测暂不可用，查看原因并重试
+              </button>
             )}
             {detail?.mission && (
               <p className="text-xs text-muted-foreground">
@@ -1284,6 +1353,35 @@ export function AgentCrmWorkbench({
                         </p>
                       </section>
                     )}
+                    {detail.evaluationError && (
+                      <section
+                        className="space-y-2 rounded-lg border p-3 text-sm"
+                        aria-label="评测读取失败"
+                      >
+                        <p role="alert" className="text-destructive">
+                          评测暂不可用：{detail.evaluationError}
+                        </p>
+                        <p className="text-muted-foreground">
+                          运行结果仍保留。重试只读取评测，不会重新运行 Agent、语义 Judge 或投递
+                          Eval。
+                        </p>
+                        {activeRun && (
+                          <p className="text-muted-foreground">
+                            运行期间会自动刷新评测，结束后可手动重试。
+                          </p>
+                        )}
+                        <button
+                          type="button"
+                          disabled={
+                            busy || cancelling || activeRun || readingEvaluation === detail.id
+                          }
+                          onClick={() => void retryEvaluation()}
+                          className="rounded-md border px-2 py-1 disabled:opacity-50"
+                        >
+                          {readingEvaluation === detail.id ? "正在读取评测…" : "重试读取评测"}
+                        </button>
+                      </section>
+                    )}
                     {detail.evaluation && (
                       <section
                         className="rounded-lg border p-3 text-xs"
@@ -1333,12 +1431,20 @@ export function AgentCrmWorkbench({
                             ? ` · ${detail.evaluation.summary.structuredClaims} 条 Claims`
                             : ""}
                         </p>
-                        <button type="button" disabled={busy || !["completed", "partial", "failed", "cancelled"].includes(detail.status)}
+                        <button
+                          type="button"
+                          disabled={
+                            busy ||
+                            !["completed", "partial", "failed", "cancelled"].includes(detail.status)
+                          }
                           onClick={() => void runSemanticJudge("deterministic_export")}
-                          className="mt-2 rounded-md border px-2 py-1 font-medium disabled:opacity-50">
+                          className="mt-2 rounded-md border px-2 py-1 font-medium disabled:opacity-50"
+                        >
                           保存并投递确定性 Eval
                         </button>
-                        {evalExportNotice?.runId === detail.id && <p className="mt-1 text-muted-foreground">{evalExportNotice.text}</p>}
+                        {evalExportNotice?.runId === detail.id && (
+                          <p className="mt-1 text-muted-foreground">{evalExportNotice.text}</p>
+                        )}
                         {detail.evaluation.semanticJudge.status === "completed" ? (
                           <div className="mt-2 rounded-md bg-muted p-2 text-muted-foreground">
                             语义 Judge：{detail.evaluation.semanticJudge.verdict}

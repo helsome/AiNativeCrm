@@ -2,7 +2,7 @@ import { AgentIntegrationsPanel } from "@/components/ai/AgentIntegrationsPanel";
 import { redirect } from "next/navigation";
 
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
-import { ROLE_RANK } from "@/lib/auth/types";
+import { ROLE_RANK, roleAtLeast } from "@/lib/auth/types";
 
 import { PainelDeProvedores } from "./_components/PainelDeProvedores";
 
@@ -26,12 +26,17 @@ export default async function ProvedoresPage() {
   const activeOrg = await resolveActiveOrg(user);
   if (!activeOrg) redirect("/app");
   if (ROLE_RANK[activeOrg.role] < ROLE_RANK.manager) redirect("/403");
+  const canWrite =
+    !user.support || (user.support.status === "active" && user.support.access_mode === "full");
 
   return (
     <>
       <PainelDeProvedores />
       <div className="p-6">
-        <AgentIntegrationsPanel />
+        <AgentIntegrationsPanel
+          canManageIntegrations={canWrite && roleAtLeast(activeOrg.role, "admin")}
+          canReconcileCleanup={canWrite}
+        />
       </div>
     </>
   );

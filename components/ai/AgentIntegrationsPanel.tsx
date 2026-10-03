@@ -11,7 +11,13 @@ type Provider = {
   available_knowledge_bases?: string[];
 };
 /** An existing navigation destination exposes readiness, pause and explicit activation. */
-export function AgentIntegrationsPanel() {
+export function AgentIntegrationsPanel({
+  canManageIntegrations,
+  canReconcileCleanup,
+}: {
+  canManageIntegrations: boolean;
+  canReconcileCleanup: boolean;
+}) {
   const [items, setItems] = useState<Provider[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -46,6 +52,7 @@ export function AgentIntegrationsPanel() {
     return () => controller.abort();
   }, []);
   async function toggle(item: Provider) {
+    if (!canManageIntegrations) return;
     setBusy(true);
     setError("");
     try {
@@ -68,6 +75,7 @@ export function AgentIntegrationsPanel() {
     }
   }
   async function connectWiki() {
+    if (!canManageIntegrations) return;
     setBusy(true);
     setError("");
     try {
@@ -102,6 +110,13 @@ export function AgentIntegrationsPanel() {
         Mem0 保存已确认客户记忆，WeKnora 读取公司产品 Wiki，Langfuse 接收脱敏 trace 与
         Eval。默认关闭；管理员启用前须确认服务权限与数据去向。
       </p>
+      {!canManageIntegrations && (
+        <p className="mt-2 text-sm text-muted-foreground">
+          {canReconcileCleanup
+            ? "服务启用/暂停、重试投递和 Wiki 来源登记仅限管理员；你仍可查看接入状态并核对客户记忆清理结果。"
+            : "当前为只读访问，无法变更服务接入或核对清理结果。"}
+        </p>
+      )}
       <div className="mt-4 space-y-3">
         {items.map((item) => (
           <div key={item.provider} className="flex items-center justify-between gap-4">
@@ -116,7 +131,7 @@ export function AgentIntegrationsPanel() {
             </div>
             <Button
               variant="outline"
-              disabled={busy || (!item.configured && !item.enabled)}
+              disabled={!canManageIntegrations || busy || (!item.configured && !item.enabled)}
               onClick={() => void toggle(item)}
             >
               {item.enabled ? "暂停" : "启用"}
@@ -124,8 +139,9 @@ export function AgentIntegrationsPanel() {
             {item.provider !== "weknora" && (
               <Button
                 variant="outline"
-                disabled={busy || !item.enabled}
+                disabled={!canManageIntegrations || busy || !item.enabled}
                 onClick={async () => {
+                  if (!canManageIntegrations) return;
                   setBusy(true);
                   setError("");
                   try {
@@ -162,6 +178,7 @@ export function AgentIntegrationsPanel() {
           <label className="block text-sm">
             Wiki 来源名称
             <input
+              disabled={!canManageIntegrations}
               className="ml-2 rounded-md border bg-background p-2"
               value={wikiName}
               maxLength={120}
@@ -174,6 +191,7 @@ export function AgentIntegrationsPanel() {
           <label className="block text-sm">
             公司产品知识库
             <select
+              disabled={!canManageIntegrations}
               className="ml-2 rounded-md border bg-background p-2"
               value={wikiKb}
               onChange={(event) => {
@@ -193,13 +211,22 @@ export function AgentIntegrationsPanel() {
           </label>
           <label className="flex gap-2 text-sm">
             <input
+              disabled={!canManageIntegrations}
               type="checkbox"
               checked={wikiConfirmed}
               onChange={(event) => setWikiConfirmed(event.target.checked)}
             />
             确认整个知识库均可供本组织使用，不含不同权限的混合材料
           </label>
-          <Button disabled={busy || wikiName.trim().length < 2 || !wikiKb || !wikiConfirmed}>
+          <Button
+            disabled={
+              !canManageIntegrations ||
+              busy ||
+              wikiName.trim().length < 2 ||
+              !wikiKb ||
+              !wikiConfirmed
+            }
+          >
             加入 Agent 知识来源
           </Button>
           {wikiNotice && <p className="text-sm text-muted-foreground">{wikiNotice}</p>}
@@ -220,6 +247,7 @@ export function AgentIntegrationsPanel() {
                 <>
                   <label>
                     <input
+                      disabled={!canReconcileCleanup}
                       type="checkbox"
                       checked={cleanupSettled[receipt.id] ?? false}
                       onChange={(event) =>
@@ -230,8 +258,9 @@ export function AgentIntegrationsPanel() {
                   </label>
                   <Button
                     variant="outline"
-                    disabled={busy || !cleanupSettled[receipt.id]}
+                    disabled={!canReconcileCleanup || busy || !cleanupSettled[receipt.id]}
                     onClick={async () => {
+                      if (!canReconcileCleanup) return;
                       setBusy(true);
                       setError("");
                       try {
