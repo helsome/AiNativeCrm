@@ -28,7 +28,10 @@ async function fixture(pool: pg.Pool) {
   // O QA não sobe o worker: reproduzir seu bootstrap idempotente, sem mover ponteiro existente.
   await seedPlatformPlaybook(pool);
   const email = `autonomia-ui-${randomUUID()}@invariant.test`;
-  const result = await db.auth.admin.createUser({ email, password, email_confirm: true });
+  const result = await db.auth.admin.createUser({
+    email, password, email_confirm: true,
+    user_metadata: { locale: "pt-BR" },
+  });
   if (result.error || !result.data.user) throw result.error;
   const user = result.data.user.id;
   users.push(user);

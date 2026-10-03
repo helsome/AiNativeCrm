@@ -3,6 +3,8 @@ import { defineConfig } from "@playwright/test";
 import base from "./playwright.config";
 
 const origin = "http://127.0.0.1:3012";
+// The confirmation callback and the browser must use this same isolated origin.
+process.env.NEXT_PUBLIC_APP_URL = origin;
 export default defineConfig({
   ...base,
   use: { ...base.use, baseURL: origin },
@@ -11,6 +13,7 @@ export default defineConfig({
     url: origin,
     reuseExistingServer: false,
     timeout: 120_000,
+    env: { NEXT_PUBLIC_APP_URL: origin },
   },
   projects: [{
     name: "chromium-local-acceptance",

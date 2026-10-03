@@ -178,15 +178,15 @@ test.describe("gestão de funis", () => {
         const list = await page.request.get("/api/v1/pipelines");
         expect(list.ok()).toBeTruthy();
         const body = (await list.json()) as {
-          data: { pipelines: Array<{ id: string; name: string }> };
+          data: Array<{ id: string; name: string }>;
         };
-        const defaultId = body.data.pipelines.find((pipeline) => pipeline.name === "Pedidos")?.id;
+        const defaultId = body.data.find((pipeline) => pipeline.name === "Pedidos")?.id;
         expect(defaultId).toBeTruthy();
         const restored = await page.request.patch(`/api/v1/pipelines/${defaultId}`, {
           data: { is_default: true },
         });
         expect(restored.ok()).toBeTruthy();
-        if (body.data.pipelines.some((pipeline) => pipeline.id === createdId)) {
+        if (body.data.some((pipeline) => pipeline.id === createdId)) {
           const archived = await page.request.delete(`/api/v1/pipelines/${createdId}`);
           expect(archived.ok()).toBeTruthy();
         }

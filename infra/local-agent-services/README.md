@@ -69,7 +69,7 @@ docker compose --env-file infra/local-agent-services/.env.generated -f infra/loc
 ```bash
 pnpm exec tsx scripts/provision-local-agent-services.ts bindings --langfuse
 # CRM 与选定的真实运行 worker 都必须加载以下两个 env 文件。
-node --env-file=.env.e2e --env-file=infra/local-agent-services/.env.crm.generated node_modules/next/dist/bin/next start --port 3009
+NEXT_PUBLIC_APP_URL=http://localhost:3009 node --env-file=.env.e2e --env-file=infra/local-agent-services/.env.crm.generated node_modules/next/dist/bin/next start --port 3009
 ```
 
 在 CRM 集成页面启用对应 provider，通过管理员 API 连接 Wiki source，并把该 source 选择到测试 Agent 的草稿。已有真实 API 的权限、审计和组织隔离继续适用；脚本不直接改写 Agent 配置或发布 Agent。
@@ -88,3 +88,20 @@ pnpm exec tsx --env-file=.env.e2e --env-file=infra/local-agent-services/.env.crm
 先通过 CRM 的显式 Eval POST 生成报告，再通过已鉴权的 `ai-integration-drain` 专用接口投递并等待 Worker 落库。Langfuse v4 使用 Observations API v2 和 Scores API v3 回读，不能用旧 `/traces/:id` 的 404 判断入库失败；见[官方 API 文档](https://langfuse.com/docs/api-and-data-platform/features/public-api)。探针必须查到对应 run 的模型、工具、分数，并确认 input/output 均为空（隐私保护），不能将 HTTP 200 或队列 done 当作完整验收。
 
 验证输出只含 ID、数量、哈希和分数，写入受忽略的 `.env.verification.generated`。真实模型调用成功不代表业务任务完成；部分结果、Judge 失败、来源缺失必须保留。
+
+## 外置盘迁移后的注册邮件恢复
+
+2026-10-03 实际遇到两个本地配置问题：`.env.e2e` 的旧 `NEXT_PUBLIC_APP_URL` 指向 3001，导致确认邮件验证后跳到未监听端口；Colima 的 Kong 模板 bind mount 在 VM 中成了目录，GoTrue 缓存了目录列表而非邮件模板。宿主模板文件没有改动，数据库、卷和会话没有清空。
+
+启动真实 3009 时按上面的命令显式设置回跳地址；隔离 Playwright 3012 使用 `playwright.acceptance.config.ts`，不能沿用 3001。邮件故障须先确认容器和 mount 形态；本机已验证的恢复操作仅针对以下本地容器：
+
+```bash
+docker update --memory 128m --memory-swap 128m supabase_inbucket_pi-native-crm
+docker start supabase_inbucket_pi-native-crm
+# 仅当目标 .html 实际为目录时，恢复该目录的默认 index 文件。
+docker cp supabase/templates/confirmation.html supabase_kong_pi-native-crm:/home/kong/templates/email/confirmation.html/index.html
+docker cp supabase/templates/recovery.html supabase_kong_pi-native-crm:/home/kong/templates/email/recovery.html/index.html
+docker restart --timeout 10 supabase_auth_pi-native-crm
+```
+
+这修复了当前邮件内容及 GoTrue 缓存，不意味着 Colima 的文件共享配置已规范化。后续重建 VM/容器须重新核对模板 mount。验收已用新合成账号完成真实 Mailpit 收信、确认、onboarding 与重登录；不提交邮件 token、私有环境文件或浏览器 trace ZIP。上述命令需要当前 Colima Docker context；不要启动另一个默认 VM 或执行 `down -v`。
