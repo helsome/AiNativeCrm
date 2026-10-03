@@ -29,6 +29,11 @@ import type { MarcaDeSaida } from "@/lib/branding/saida";
 
 const marcaDaSaida = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/branding/saida", () => ({ marcaDaSaida }));
+// Anonymous locale resolution reads request headers; keep the real resolver,
+// but supply the request context missing from direct Server Component calls.
+vi.mock("next/headers", () => ({
+  headers: async () => new Headers({ "accept-language": "pt-BR" }),
+}));
 // A casca passou a resolver o idioma da interface (ver `IdiomaProvider` no
 // próprio layout) e por isso chama `createClient()`, que lê cookies — algo que
 // só existe dentro de uma requisição real. Fora do login quase nunca há
